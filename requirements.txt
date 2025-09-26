@@ -34,8 +34,8 @@ python-dotenv==1.1.1
 python-jose[cryptography]==3.3.0
 python-multipart==0.0.20
 PyJWT==2.8.0
-quart-jwt-extended==1.1.0
-Quart==0.20.0
+quart-jwt-extended
+Quart
 quart-cors==0.8.0
 SQLAlchemy==2.0.43
 typing-inspection==0.4.1

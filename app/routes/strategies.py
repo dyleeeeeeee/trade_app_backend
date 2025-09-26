@@ -1,5 +1,5 @@
-from quart import Blueprint, request, jsonify, current_app
-from quart_auth import login_required, current_user
+from quart import Blueprint, request, jsonify, current_app, g
+from ..middleware import jwt_required_custom, admin_required
 from ..utils.email import email_service
 
 strategy_bp = Blueprint('strategy', __name__)
@@ -81,7 +81,6 @@ DEFAULT_STRATEGIES = [
 ]
 
 @strategy_bp.route('', methods=['GET'])
-@login_required
 async def get_strategies():
     """Get all available strategies"""
     try:
@@ -130,11 +129,11 @@ async def get_strategies():
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/my-strategies', methods=['GET'])
-@login_required
+@jwt_required_custom
 async def get_my_strategies():
     """Get user's active strategy subscriptions with calculated earnings based on time elapsed"""
     try:
-        user_id = int(current_user.auth_id)
+        user_id = g.user_id
         async with current_app.db_pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT ss.id, ss.strategy_id, ss.invested_amount, ss.subscribed_at,
@@ -199,7 +198,7 @@ async def get_my_strategies():
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/<int:strategy_id>/subscribe', methods=['POST'])
-@login_required
+@jwt_required_custom
 async def subscribe_to_strategy(strategy_id):
     """Subscribe to a strategy with investment amount"""
     try:
@@ -209,7 +208,7 @@ async def subscribe_to_strategy(strategy_id):
         if not invested_amount or invested_amount <= 0:
             return jsonify({'error': 'Valid investment amount required'}), 400
 
-        user_id = int(current_user.auth_id)
+        user_id = g.user_id
 
         async with current_app.db_pool.acquire() as conn:
             # Check if strategy exists and is active
@@ -275,11 +274,11 @@ async def subscribe_to_strategy(strategy_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/<int:strategy_id>/unsubscribe', methods=['POST'])
-@login_required
+@jwt_required_custom
 async def unsubscribe_from_strategy(strategy_id):
     """Unsubscribe from a strategy"""
     try:
-        user_id = int(current_user.auth_id)
+        user_id = g.user_id
 
         async with current_app.db_pool.acquire() as conn:
             # Find active subscription

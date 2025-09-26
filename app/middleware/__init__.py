@@ -1,5 +1,7 @@
-from quart import Quart
+from quart import Quart, request, jsonify, g
 from quart_cors import cors
+from functools import wraps
+from quart_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 
 def setup_middleware(app: Quart):
     # Enable CORS for multiple origins (development and production)
@@ -10,4 +12,37 @@ def setup_middleware(app: Quart):
         "http://localhost:3000",  # Alternative development port
         "http://127.0.0.1:8080",  # Alternative localhost
         "http://127.0.0.1:3000"   # Alternative localhost
-    ], allow_credentials=True)
+    ])
+
+def jwt_required_custom(f):
+    @wraps(f)
+    async def decorated_function(*args, **kwargs):
+        try:
+            await verify_jwt_in_request()
+            user_id = get_jwt_identity()
+            # Store user_id in g for access in route handlers
+            g.user_id = int(user_id)
+            return await f(*args, **kwargs)
+        except Exception as e:
+            return jsonify({'message': 'Invalid or missing JWT token'}), 401
+    return decorated_function
+
+def admin_required(f):
+    @wraps(f)
+    async def decorated_function(*args, **kwargs):
+        try:
+            await verify_jwt_in_request()
+            user_id = get_jwt_identity()
+            
+            # Check if user is admin
+            async with request.app.db_pool.acquire() as conn:
+                user = await conn.fetchrow('SELECT role FROM users WHERE id = $1', int(user_id))
+                if not user or user['role'] != 'admin':
+                    return jsonify({'message': 'Admin access required'}), 403
+
+            # Store user_id in g for access in route handlers
+            g.user_id = int(user_id)
+            return await f(*args, **kwargs)
+        except Exception as e:
+            return jsonify({'message': 'Invalid or missing JWT token'}), 401
+    return decorated_function

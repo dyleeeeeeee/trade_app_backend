@@ -1,27 +1,12 @@
-from quart import Blueprint, request, jsonify, current_app
-from quart_auth import login_required, current_user
+from quart import Blueprint, request, jsonify, current_app, g
+from ..middleware import admin_required
 from ..utils.email import email_service
 
 admin_bp = Blueprint('admin', __name__)
 
-async def check_admin():
-    """Helper function to check if current user is admin"""
-    if not current_user.is_authenticated:
-        return False, jsonify({'message': 'Authentication required'}), 401
-        
-    user_id = int(current_user.auth_id)
-    async with current_app.db_pool.acquire() as conn:
-        user = await conn.fetchrow('SELECT role FROM users WHERE id = $1', user_id)
-        if not user or user['role'] != 'admin':
-            return False, jsonify({'message': 'Admin access required'}), 403
-    return True, None, None
-
 @admin_bp.route('/admin/users', methods=['GET'])
-@login_required
+@admin_required
 async def get_users():
-    is_admin, error_response, status_code = await check_admin()
-    if not is_admin:
-        return error_response, status_code
     async with current_app.db_pool.acquire() as conn:
         users = await conn.fetch('''
             SELECT id, email, role, is_blocked, created_at
@@ -39,11 +24,8 @@ async def get_users():
         return jsonify({'users': user_list}), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/block', methods=['POST'])
-@login_required
+@admin_required
 async def block_user(user_id):
-    is_admin, error_response, status_code = await check_admin()
-    if not is_admin:
-        return error_response, status_code
     data = await request.get_json()
     block = data.get('block', False)
 
@@ -57,11 +39,8 @@ async def block_user(user_id):
         return jsonify({'message': f'User {"blocked" if block else "unblocked"} successfully'}), 200
 
 @admin_bp.route('/admin/withdrawals', methods=['GET'])
-@login_required
+@admin_required
 async def get_withdrawals():
-    is_admin, error_response, status_code = await check_admin()
-    if not is_admin:
-        return error_response, status_code
     async with current_app.db_pool.acquire() as conn:
         withdrawals = await conn.fetch('''
             SELECT w.id, w.amount, w.status, w.requested_at, u.email as user_email
@@ -81,11 +60,8 @@ async def get_withdrawals():
         return jsonify({'withdrawals': withdrawal_list}), 200
 
 @admin_bp.route('/admin/withdrawals/<int:withdrawal_id>/approve', methods=['POST'])
-@login_required
+@admin_required
 async def approve_withdrawal(withdrawal_id):
-    is_admin, error_response, status_code = await check_admin()
-    if not is_admin:
-        return error_response, status_code
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
             # Get withdrawal details
@@ -124,11 +100,8 @@ async def approve_withdrawal(withdrawal_id):
             return jsonify({'message': 'Withdrawal approved successfully'}), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/balance', methods=['POST'])
-@login_required
+@admin_required
 async def update_user_balance(user_id):
-    is_admin, error_response, status_code = await check_admin()
-    if not is_admin:
-        return error_response, status_code
     data = await request.get_json()
     new_balance = data.get('balance', 0)
 
@@ -168,11 +141,8 @@ async def update_user_balance(user_id):
             }), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/balance-info', methods=['GET'])
-@login_required
+@admin_required
 async def get_user_balance(user_id):
-    is_admin, error_response, status_code = await check_admin()
-    if not is_admin:
-        return error_response, status_code
     async with current_app.db_pool.acquire() as conn:
         # Get the most recent balance_after
         result = await conn.fetchrow('''

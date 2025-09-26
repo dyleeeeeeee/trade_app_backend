@@ -4,7 +4,7 @@ from .config import QuartConfig
 from hypercorn.config import Config
 from .routes import register_routes
 from .middleware import setup_middleware
-from quart_auth import QuartAuth
+from quart_jwt_extended import JWTManager
 import os
 
 
@@ -16,7 +16,10 @@ class App(Quart):
         self.config.from_object(QuartConfig())
         
         self.secret_key = QuartConfig().SECRET_KEY
-        QuartAuth(self)  # Initialize Quart-Auth
+        
+        # Initialize JWT
+        self.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
+        jwt = JWTManager(self)
 
         self.db_pool = None
 

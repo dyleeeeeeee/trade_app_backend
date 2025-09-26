@@ -1,13 +1,13 @@
-from quart import Blueprint, request, jsonify, current_app
-from quart_auth import login_required, current_user
+from quart import Blueprint, request, jsonify, current_app, g
+from ..middleware import jwt_required_custom
 from ..utils.email import email_service
 
 wallet_bp = Blueprint('wallet', __name__)
 
 @wallet_bp.route('/wallet', methods=['GET'])
-@login_required
+@jwt_required_custom
 async def get_balance():
-    user_id = int(current_user.auth_id)
+    user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
         # Get the most recent balance_after
@@ -24,7 +24,7 @@ async def get_balance():
         return jsonify({'balance': balance}), 200
 
 @wallet_bp.route('/deposit', methods=['POST'])
-@login_required
+@jwt_required_custom
 async def deposit():
     data = await request.get_json()
     amount = data.get('amount', 0)
@@ -32,7 +32,7 @@ async def deposit():
     if amount <= 0:
         return jsonify({'message': 'Invalid amount'}), 400
 
-    user_id = int(current_user.auth_id)
+    user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -57,7 +57,7 @@ async def deposit():
             return jsonify({'message': 'Deposit successful', 'balance': balance_after}), 200
 
 @wallet_bp.route('/withdraw', methods=['POST'])
-@login_required
+@jwt_required_custom
 async def withdraw():
     data = await request.get_json()
     amount = data.get('amount', 0)
@@ -65,7 +65,7 @@ async def withdraw():
     if amount <= 0:
         return jsonify({'message': 'Invalid amount'}), 400
 
-    user_id = int(current_user.auth_id)
+    user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -105,7 +105,7 @@ async def withdraw():
             }), 200
 
 @wallet_bp.route('/transfer', methods=['POST'])
-@login_required
+@jwt_required_custom
 async def transfer():
     data = await request.get_json()
     recipient_email = data.get('recipient')
@@ -114,7 +114,7 @@ async def transfer():
     if not recipient_email or amount <= 0:
         return jsonify({'message': 'Recipient email and valid amount required'}), 400
 
-    user_id = int(current_user.auth_id)
+    user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -166,9 +166,9 @@ async def transfer():
             return jsonify({'message': 'Transfer successful'}), 200
 
 @wallet_bp.route('/withdrawals', methods=['GET'])
-@login_required
+@jwt_required_custom
 async def get_withdrawals():
-    user_id = int(current_user.auth_id)
+    user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
         withdrawals = await conn.fetch('''
@@ -188,9 +188,9 @@ async def get_withdrawals():
         return jsonify({'withdrawals': withdrawal_list}), 200
 
 @wallet_bp.route('/deposits', methods=['GET'])
-@login_required
+@jwt_required_custom
 async def get_deposits():
-    user_id = int(current_user.auth_id)
+    user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
         deposits = await conn.fetch('''

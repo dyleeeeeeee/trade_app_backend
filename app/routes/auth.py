@@ -1,4 +1,4 @@
-from quart import Blueprint, request, jsonify, session, current_app, g
+from quart import Blueprint, request, jsonify, session, current_app, g, make_response
 from ..middleware import login_required
 from ..utils.email import email_service
 
@@ -17,17 +17,32 @@ async def login():
         user = await conn.fetchrow('SELECT * FROM users WHERE email = $1', email)
 
         if user and user['password'] == password:  # Simple password check (no hashing as requested)
-            session['user_id'] = user['id']
+            # Create response with user data
+            response_data = {
+                'id': user['id'],
+                'email': user['email'],
+                'role': user['role']
+            }
+            response = jsonify(response_data)
+
+            # Set authentication cookie with proper CORS settings
+            response.set_cookie(
+                'user_session',  # Cookie name
+                str(user['id']),  # Cookie value (user ID)
+                httponly=True,  # Prevent JavaScript access
+                secure=False,  # False for development (HTTP), True for production (HTTPS)
+                samesite='Lax',  # Allow cross-origin requests, 'None' in production with HTTPS
+                max_age=86400 * 7,  # 7 days
+                path='/'
+            )
+
+            print(f"DEBUG: Set cookie for user_id = {user['id']}")  # Debug log
 
             # Send login notification email (don't await to avoid blocking login)
             import asyncio
             asyncio.create_task(email_service.send_login_notification(user['email']))
 
-            return jsonify({
-                'id': user['id'],
-                'email': user['email'],
-                'role': user['role']
-            }), 200
+            return response, 200
 
     return jsonify({'message': 'Invalid credentials'}), 401
 
@@ -53,22 +68,36 @@ async def signup():
             RETURNING id, email, role
         ''', email, password)
 
-        session['user_id'] = user['id']
+        # Create response with user data
+        response_data = {
+            'id': user['id'],
+            'email': user['email'],
+            'role': user['role']
+        }
+        response = jsonify(response_data)
+
+        # Set authentication cookie with proper CORS settings
+        response.set_cookie(
+            'user_session',  # Cookie name
+            str(user['id']),  # Cookie value (user ID)
+            httponly=True,  # Prevent JavaScript access
+            secure=False,  # False for development (HTTP), True for production (HTTPS)
+            samesite='Lax',  # Allow cross-origin requests, 'None' in production with HTTPS
+            max_age=86400 * 7,  # 7 days
+            path='/'
+        )
 
         # Send welcome email (don't await to avoid blocking signup)
         import asyncio
         asyncio.create_task(email_service.send_welcome_email(user['email']))
 
-        return jsonify({
-            'id': user['id'],
-            'email': user['email'],
-            'role': user['role']
-        }), 201
+        return response, 201
 
 @auth_bp.route('/logout', methods=['POST'])
 async def logout():
-    session.pop('user_id', None)
-    return jsonify({'message': 'Logged out'}), 200
+    response = jsonify({'message': 'Logged out'})
+    response.delete_cookie('user_session', path='/')
+    return response, 200
 
 @auth_bp.route('/user', methods=['GET'])
 @login_required

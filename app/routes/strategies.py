@@ -85,7 +85,7 @@ DEFAULT_STRATEGIES = [
 async def get_strategies():
     """Get all available strategies"""
     try:
-        async with g.app.db_pool.acquire() as conn:
+        async with current_app.db_pool.acquire() as conn:
             # Seed strategies if they don't exist
             existing_count = await conn.fetchval('SELECT COUNT(*) FROM strategies')
             if existing_count == 0:
@@ -126,7 +126,7 @@ async def get_strategies():
             return jsonify({'strategies': strategies}), 200
 
     except Exception as e:
-        g.app.logger.error(f"Error getting strategies: {e}")
+        current_app.logger.error(f"Error getting strategies: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/my-strategies', methods=['GET'])
@@ -135,7 +135,7 @@ async def get_my_strategies():
     """Get user's active strategy subscriptions with calculated earnings based on time elapsed"""
     try:
         user_id = g.user['id']
-        async with g.app.db_pool.acquire() as conn:
+        async with current_app.db_pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT ss.id, ss.strategy_id, ss.invested_amount, ss.subscribed_at,
                        s.name, s.description, s.category, s.risk_level, s.expected_roi
@@ -195,7 +195,7 @@ async def get_my_strategies():
             return jsonify({'strategies': my_strategies}), 200
 
     except Exception as e:
-        g.app.logger.error(f"Error getting user strategies: {e}")
+        current_app.logger.error(f"Error getting user strategies: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/<int:strategy_id>/subscribe', methods=['POST'])
@@ -211,7 +211,7 @@ async def subscribe_to_strategy(strategy_id):
 
         user_id = g.user['id']
 
-        async with g.app.db_pool.acquire() as conn:
+        async with current_app.db_pool.acquire() as conn:
             # Check if strategy exists and is active
             strategy = await conn.fetchrow('SELECT * FROM strategies WHERE id = $1 AND is_active = true', strategy_id)
             if not strategy:
@@ -267,7 +267,7 @@ async def subscribe_to_strategy(strategy_id):
             }), 201
 
     except Exception as e:
-        g.app.logger.error(f"Error subscribing to strategy: {e}")
+        current_app.logger.error(f"Error subscribing to strategy: {e}")
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/<int:strategy_id>/unsubscribe', methods=['POST'])
@@ -277,7 +277,7 @@ async def unsubscribe_from_strategy(strategy_id):
     try:
         user_id = g.user['id']
 
-        async with g.app.db_pool.acquire() as conn:
+        async with current_app.db_pool.acquire() as conn:
             # Find active subscription
             subscription = await conn.fetchrow('''
                 SELECT ss.*, s.name, s.expected_roi FROM strategy_subscriptions ss
@@ -341,5 +341,5 @@ async def unsubscribe_from_strategy(strategy_id):
             }), 200
 
     except Exception as e:
-        g.app.logger.error(f"Error unsubscribing from strategy: {e}")
+        current_app.logger.error(f"Error unsubscribing from strategy: {e}")
         return jsonify({'error': 'Internal server error'}), 500

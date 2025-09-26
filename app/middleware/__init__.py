@@ -1,19 +1,30 @@
-from quart import Quart, request, jsonify, session, g
+from quart import Quart, request, jsonify, g
 from quart_cors import cors
 from functools import wraps
 import asyncpg
 
 def setup_middleware(app: Quart):
-    # Enable CORS
-    app = cors(app, allow_origin="http://localhost:8080", allow_credentials=True)
+    # Enable CORS for multiple origins (development and production)
+    app = cors(app, allow_origin=[
+        "http://localhost:8080",  # Development frontend
+        "https://protective-optimism-production-d4a3.up.railway.app",  # Railway backend (for deployed frontend)
+        "https://astridgloballtd.pro",  # Cloudflare Pages production frontend
+        "http://localhost:3000",  # Alternative development port
+        "http://127.0.0.1:8080",  # Alternative localhost
+        "http://127.0.0.1:3000"   # Alternative localhost
+    ], allow_credentials=True)
 
     @app.before_request
     async def load_user():
-        user_id = session.get('user_id')
+        user_id = request.cookies.get('user_session')
         if user_id:
-            async with app.db_pool.acquire() as conn:
-                user = await conn.fetchrow('SELECT * FROM users WHERE id = $1', user_id)
-                g.user = user
+            try:
+                user_id = int(user_id)  # Convert string to int
+                async with app.db_pool.acquire() as conn:
+                    user = await conn.fetchrow('SELECT * FROM users WHERE id = $1', user_id)
+                    g.user = user
+            except Exception as e:
+                g.user = None
         else:
             g.user = None
 

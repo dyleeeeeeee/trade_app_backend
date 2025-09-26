@@ -27,7 +27,8 @@ class QuartConfig:
 
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
-    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_SAMESITE = 'Lax'  # Use 'None' in production with HTTPS
+    SESSION_COOKIE_DOMAIN = None  # Allow any domain
 
     # Email settings
     SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')

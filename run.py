@@ -16,7 +16,7 @@ async def main():
     """
     # Create the application instance using your factory
     app = await create_app()
-
+    return app
     # Configure Hypercorn
     config = Config()
     

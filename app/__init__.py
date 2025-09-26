@@ -5,7 +5,6 @@ from hypercorn.config import Config
 from .routes import register_routes
 from .middleware import setup_middleware
 import os
-from quart_cors import cors # 👈 1. Import the cors function
 
 
 class App(Quart):
@@ -21,11 +20,10 @@ class App(Quart):
 
 
         @self.before_serving
-        async def setup():
+        async def init_services():
             await self.setup()
             await self.create_tables()
-            self = cors(self, allow_origin="*")
-            
+
         @self.after_serving
         async def cleanup():
             await self.cleanup()
@@ -71,13 +69,28 @@ class App(Quart):
                     requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
-                CREATE TABLE IF NOT EXISTS copy_trading_subscriptions (
+                CREATE TABLE IF NOT EXISTS strategies (
                     id SERIAL PRIMARY KEY,
-                    follower_id INTEGER REFERENCES users(id),
-                    trader_id VARCHAR(100) NOT NULL,
-                    allocation DECIMAL(5, 2) NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    category VARCHAR(50) NOT NULL, -- 'crypto' or 'quant'
+                    risk_level VARCHAR(20) NOT NULL, -- 'low', 'medium', 'high'
+                    expected_roi DECIMAL(5, 2) NOT NULL, -- Daily ROI percentage
+                    min_investment DECIMAL(20, 8) NOT NULL,
+                    max_investment DECIMAL(20, 8),
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS strategy_subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER REFERENCES users(id),
+                    strategy_id INTEGER REFERENCES strategies(id),
+                    invested_amount DECIMAL(20, 8) NOT NULL,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    unsubscribed_at TIMESTAMP,
+                    UNIQUE(user_id, strategy_id)
                 );
             ''')
 

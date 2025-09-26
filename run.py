@@ -4,8 +4,10 @@
 # If it's inside a package 'my_app/__init__.py', it will be:
 # from my_app import create_app
 from app import App # Assuming your app code is in 'main.py'
+from quart_cors import cors # 👈 1. Import the cors function
 
 app = App(__name__)
+app = cors(app, allow_origin="*")
 
 # async def main():
 #     """

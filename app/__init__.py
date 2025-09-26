@@ -96,6 +96,7 @@ class App(Quart):
         )
         setup_middleware(self)
         register_routes(self)
+        self.logger.warning("Routes: \n" + str(self.url_map))
 
 
 # async def create_app():

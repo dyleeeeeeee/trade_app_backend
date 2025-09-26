@@ -1,0 +1,11 @@
+[build]
+builder = "python"
+
+[deploy]
+startCommand = "python run.py"
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+
+[build.buildCmd]
+cmd = "pip install -r requirements.txt"

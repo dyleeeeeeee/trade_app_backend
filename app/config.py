@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 
-class Config:
+class QuartConfig:
     load_dotenv()
     SECRET_KEY = os.getenv('SECRET_KEY', 'your-secret-key-here')
 

@@ -219,6 +219,46 @@ support@cookiecash.com"""
 
         await self.send_email(email, subject, body)
 
+    async def send_strategy_subscription_email(self, email: str, strategy_name: str, invested_amount: float, expected_roi: float, risk_level: str):
+        """Send strategy subscription confirmation email"""
+        subject = f"Strategy Subscription Confirmed - {strategy_name}"
+
+        body = f"""Hello,
+
+Great news! You have successfully subscribed to the {strategy_name} strategy.
+
+Subscription Details:
+- Strategy: {strategy_name}
+- Investment Amount: ${invested_amount:.2f}
+- Expected Daily ROI: {expected_roi:.2f}%
+- Risk Level: {risk_level.title()}
+
+What happens next:
+1. Your strategy will start generating earnings immediately based on market conditions
+2. You can monitor your earnings in your dashboard anytime
+3. Earnings are calculated daily and can vary slightly due to market volatility
+4. You can unsubscribe at any time to withdraw your investment plus accumulated earnings
+
+Strategy Performance:
+- Your investment is actively managed by our AI-powered algorithms
+- Daily earnings will be added to your account automatically
+- You can view real-time performance in your strategy dashboard
+
+Important Notes:
+- Minimum earnings guarantee: 0.01% of your investment per day
+- Earnings may vary ±20% due to market conditions
+- All investments carry risk, including the potential loss of principal
+
+If you have any questions about your strategy subscription, please don't hesitate to contact our support team.
+
+Happy investing!
+
+Best regards,
+The Cookie Cash Team
+support@cookiecash.com"""
+
+        await self.send_email(email, subject, body)
+
     async def send_password_reset_email(self, email: str, reset_token: str):
         """Send password reset email"""
         subject = "Password Reset Request - Cookie Cash"

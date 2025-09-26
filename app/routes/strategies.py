@@ -1,8 +1,6 @@
-from quart import Blueprint, request, jsonify, g
-from ..utils.auth import require_auth
-from ..utils.validation import validate_json
-import asyncpg
-import json
+from quart import Blueprint, request, jsonify, g, current_app
+from ..middleware import login_required
+from ..utils.email import email_service
 
 strategy_bp = Blueprint('strategy', __name__)
 
@@ -83,7 +81,7 @@ DEFAULT_STRATEGIES = [
 ]
 
 @strategy_bp.route('', methods=['GET'])
-@require_auth
+@login_required
 async def get_strategies():
     """Get all available strategies"""
     try:
@@ -132,11 +130,11 @@ async def get_strategies():
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/my-strategies', methods=['GET'])
-@require_auth
+@login_required
 async def get_my_strategies():
     """Get user's active strategy subscriptions with calculated earnings based on time elapsed"""
     try:
-        user_id = g.user_id
+        user_id = g.user['id']
         async with g.app.db_pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT ss.id, ss.strategy_id, ss.invested_amount, ss.subscribed_at,
@@ -201,7 +199,7 @@ async def get_my_strategies():
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/<int:strategy_id>/subscribe', methods=['POST'])
-@require_auth
+@login_required
 async def subscribe_to_strategy(strategy_id):
     """Subscribe to a strategy with investment amount"""
     try:
@@ -211,7 +209,7 @@ async def subscribe_to_strategy(strategy_id):
         if not invested_amount or invested_amount <= 0:
             return jsonify({'error': 'Valid investment amount required'}), 400
 
-        user_id = g.user_id
+        user_id = g.user['id']
 
         async with g.app.db_pool.acquire() as conn:
             # Check if strategy exists and is active
@@ -256,6 +254,13 @@ async def subscribe_to_strategy(strategy_id):
                 VALUES ($1, 'strategy_investment', $2, $3, $4)
             ''', user_id, -invested_amount, current_balance, current_balance - invested_amount)
 
+            # Send subscription confirmation email (don't await to avoid blocking)
+            import asyncio
+            asyncio.create_task(email_service.send_strategy_subscription_email(
+                g.user['email'], strategy['name'], float(invested_amount), 
+                float(strategy['expected_roi']), strategy['risk_level']
+            ))
+
             return jsonify({
                 'message': f'Successfully subscribed to {strategy["name"]}',
                 'subscription_id': subscription_id
@@ -266,11 +271,11 @@ async def subscribe_to_strategy(strategy_id):
         return jsonify({'error': 'Internal server error'}), 500
 
 @strategy_bp.route('/<int:strategy_id>/unsubscribe', methods=['POST'])
-@require_auth
+@login_required
 async def unsubscribe_from_strategy(strategy_id):
     """Unsubscribe from a strategy"""
     try:
-        user_id = g.user_id
+        user_id = g.user['id']
 
         async with g.app.db_pool.acquire() as conn:
             # Find active subscription

@@ -4,6 +4,7 @@ from .config import QuartConfig
 from hypercorn.config import Config
 from .routes import register_routes
 from .middleware import setup_middleware
+from quart_auth import QuartAuth
 import os
 
 
@@ -15,6 +16,7 @@ class App(Quart):
         self.config.from_object(QuartConfig())
         
         self.secret_key = QuartConfig().SECRET_KEY
+        QuartAuth(self)  # Initialize Quart-Auth
 
         self.db_pool = None
 

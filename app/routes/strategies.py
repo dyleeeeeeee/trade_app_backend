@@ -1,5 +1,5 @@
-from quart import Blueprint, request, jsonify, g, current_app
-from ..middleware import login_required
+from quart import Blueprint, request, jsonify, current_app
+from quart_auth import login_required, current_user
 from ..utils.email import email_service
 
 strategy_bp = Blueprint('strategy', __name__)
@@ -134,7 +134,7 @@ async def get_strategies():
 async def get_my_strategies():
     """Get user's active strategy subscriptions with calculated earnings based on time elapsed"""
     try:
-        user_id = g.user['id']
+        user_id = int(current_user.auth_id)
         async with current_app.db_pool.acquire() as conn:
             rows = await conn.fetch('''
                 SELECT ss.id, ss.strategy_id, ss.invested_amount, ss.subscribed_at,
@@ -209,7 +209,7 @@ async def subscribe_to_strategy(strategy_id):
         if not invested_amount or invested_amount <= 0:
             return jsonify({'error': 'Valid investment amount required'}), 400
 
-        user_id = g.user['id']
+        user_id = int(current_user.auth_id)
 
         async with current_app.db_pool.acquire() as conn:
             # Check if strategy exists and is active
@@ -254,10 +254,14 @@ async def subscribe_to_strategy(strategy_id):
                 VALUES ($1, 'strategy_investment', $2, $3, $4)
             ''', user_id, -invested_amount, current_balance, current_balance - invested_amount)
 
+            # Get user email for notification
+            user_email_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+            user_email = user_email_row['email'] if user_email_row else None
+            
             # Send subscription confirmation email (don't await to avoid blocking)
             import asyncio
             asyncio.create_task(email_service.send_strategy_subscription_email(
-                g.user['email'], strategy['name'], float(invested_amount), 
+                user_email, strategy['name'], float(invested_amount), 
                 float(strategy['expected_roi']), strategy['risk_level']
             ))
 
@@ -275,7 +279,7 @@ async def subscribe_to_strategy(strategy_id):
 async def unsubscribe_from_strategy(strategy_id):
     """Unsubscribe from a strategy"""
     try:
-        user_id = g.user['id']
+        user_id = int(current_user.auth_id)
 
         async with current_app.db_pool.acquire() as conn:
             # Find active subscription

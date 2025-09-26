@@ -1,5 +1,5 @@
-from quart import Blueprint, request, jsonify, g, current_app
-from ..middleware import login_required
+from quart import Blueprint, request, jsonify, current_app
+from quart_auth import login_required, current_user
 from ..utils.email import email_service
 import aiohttp
 import os
@@ -137,7 +137,7 @@ async def place_trade():
     if price is None:
         return jsonify({'message': 'Unable to fetch current market price'}), 400
 
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
     total = size * price
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -199,9 +199,13 @@ async def place_trade():
                 RETURNING id, asset, side, size, price, total, created_at
             ''', user_id, asset, side, size, price, total)
 
+            # Get user email for notification
+            user_email_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+            user_email = user_email_row['email'] if user_email_row else None
+            
             # Send trade execution email (don't await to avoid blocking)
             import asyncio
-            asyncio.create_task(email_service.send_trade_executed_email(g.user['email'], asset, side, float(size), float(price), total))
+            asyncio.create_task(email_service.send_trade_executed_email(user_email, asset, side, float(size), float(price), total))
 
             return jsonify({
                 'message': f'{side.capitalize()} order placed successfully',
@@ -219,7 +223,7 @@ async def place_trade():
 @trading_bp.route('/trades', methods=['GET'])
 @login_required
 async def get_trades():
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         trades = await conn.fetch('''
@@ -250,7 +254,7 @@ async def subscribe_to_trader():
     if not trader_id or allocation <= 0 or allocation > 100:
         return jsonify({'message': 'Invalid trader ID or allocation'}), 400
 
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         # Check if already subscribed
@@ -278,7 +282,7 @@ async def subscribe_to_trader():
 @trading_bp.route('/copy/subscriptions', methods=['GET'])
 @login_required
 async def get_subscriptions():
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         subscriptions = await conn.fetch('''

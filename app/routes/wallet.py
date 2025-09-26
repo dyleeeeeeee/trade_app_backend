@@ -1,5 +1,5 @@
-from quart import Blueprint, request, jsonify, g, current_app
-from ..middleware import login_required
+from quart import Blueprint, request, jsonify, current_app
+from quart_auth import login_required, current_user
 from ..utils.email import email_service
 
 wallet_bp = Blueprint('wallet', __name__)
@@ -7,7 +7,7 @@ wallet_bp = Blueprint('wallet', __name__)
 @wallet_bp.route('/wallet', methods=['GET'])
 @login_required
 async def get_balance():
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         # Get the most recent balance_after
@@ -32,7 +32,7 @@ async def deposit():
     if amount <= 0:
         return jsonify({'message': 'Invalid amount'}), 400
 
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -65,7 +65,7 @@ async def withdraw():
     if amount <= 0:
         return jsonify({'message': 'Invalid amount'}), 400
 
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -114,7 +114,7 @@ async def transfer():
     if not recipient_email or amount <= 0:
         return jsonify({'message': 'Recipient email and valid amount required'}), 400
 
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -168,7 +168,7 @@ async def transfer():
 @wallet_bp.route('/withdrawals', methods=['GET'])
 @login_required
 async def get_withdrawals():
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         withdrawals = await conn.fetch('''
@@ -190,7 +190,7 @@ async def get_withdrawals():
 @wallet_bp.route('/deposits', methods=['GET'])
 @login_required
 async def get_deposits():
-    user_id = g.user['id']
+    user_id = int(current_user.auth_id)
 
     async with current_app.db_pool.acquire() as conn:
         deposits = await conn.fetch('''

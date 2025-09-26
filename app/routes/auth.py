@@ -1,5 +1,5 @@
-from quart import Blueprint, request, jsonify, session, current_app, g, make_response
-from ..middleware import login_required
+from quart import Blueprint, request, jsonify, current_app
+from quart_auth import AuthUser, login_user, logout_user, current_user, login_required
 from ..utils.email import email_service
 
 auth_bp = Blueprint('auth', __name__)
@@ -17,32 +17,20 @@ async def login():
         user = await conn.fetchrow('SELECT * FROM users WHERE email = $1', email)
 
         if user and user['password'] == password:  # Simple password check (no hashing as requested)
-            # Create response with user data
-            response_data = {
-                'id': user['id'],
-                'email': user['email'],
-                'role': user['role']
-            }
-            response = jsonify(response_data)
+            # Login the user using quart-auth
+            login_user(AuthUser(user['id']))
 
-            # Set authentication cookie with proper CORS settings
-            response.set_cookie(
-                'user_session',  # Cookie name
-                str(user['id']),  # Cookie value (user ID)
-                httponly=True,  # Prevent JavaScript access
-                secure=False,  # False for development (HTTP), True for production (HTTPS)
-                samesite='Lax',  # Allow cross-origin requests, 'None' in production with HTTPS
-                max_age=86400 * 7,  # 7 days
-                path='/'
-            )
-
-            print(f"DEBUG: Set cookie for user_id = {user['id']}")  # Debug log
+            print(f"DEBUG: Logged in user_id = {user['id']}")  # Debug log
 
             # Send login notification email (don't await to avoid blocking login)
             import asyncio
             asyncio.create_task(email_service.send_login_notification(user['email']))
 
-            return response, 200
+            return jsonify({
+                'id': user['id'],
+                'email': user['email'],
+                'role': user['role']
+            }), 200
 
     return jsonify({'message': 'Invalid credentials'}), 401
 
@@ -68,46 +56,38 @@ async def signup():
             RETURNING id, email, role
         ''', email, password)
 
-        # Create response with user data
-        response_data = {
-            'id': user['id'],
-            'email': user['email'],
-            'role': user['role']
-        }
-        response = jsonify(response_data)
-
-        # Set authentication cookie with proper CORS settings
-        response.set_cookie(
-            'user_session',  # Cookie name
-            str(user['id']),  # Cookie value (user ID)
-            httponly=True,  # Prevent JavaScript access
-            secure=False,  # False for development (HTTP), True for production (HTTPS)
-            samesite='Lax',  # Allow cross-origin requests, 'None' in production with HTTPS
-            max_age=86400 * 7,  # 7 days
-            path='/'
-        )
+        # Login the user using quart-auth
+        login_user(AuthUser(user['id']))
 
         # Send welcome email (don't await to avoid blocking signup)
         import asyncio
         asyncio.create_task(email_service.send_welcome_email(user['email']))
 
-        return response, 201
+        return jsonify({
+            'id': user['id'],
+            'email': user['email'],
+            'role': user['role']
+        }), 201
 
 @auth_bp.route('/logout', methods=['POST'])
 async def logout():
-    response = jsonify({'message': 'Logged out'})
-    response.delete_cookie('user_session', path='/')
-    return response, 200
+    logout_user()
+    return jsonify({'message': 'Logged out'}), 200
 
 @auth_bp.route('/user', methods=['GET'])
 @login_required
 async def get_current_user():
-    user = g.user
-    return jsonify({
-        'id': user['id'],
-        'email': user['email'],
-        'role': user['role']
-    }), 200
+    user_id = int(current_user.auth_id)
+    async with current_app.db_pool.acquire() as conn:
+        user = await conn.fetchrow('SELECT id, email, role FROM users WHERE id = $1', user_id)
+        if user:
+            return jsonify({
+                'id': user['id'],
+                'email': user['email'],
+                'role': user['role']
+            }), 200
+        else:
+            return jsonify({'message': 'User not found'}), 404
 
 @auth_bp.route('/forgot-password', methods=['POST'])
 async def forgot_password():

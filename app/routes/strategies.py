@@ -156,13 +156,15 @@ async def get_my_strategies():
 
                 # Calculate days elapsed since subscription
                 if isinstance(subscribed_at, datetime):
-                    # Ensure we're working with timezone-aware datetime
                     if subscribed_at.tzinfo is None:
                         subscribed_at = subscribed_at.replace(tzinfo=timezone.utc)
                     now = datetime.now(timezone.utc)
                     days_elapsed = (now - subscribed_at).total_seconds() / (24 * 60 * 60)
                 else:
                     days_elapsed = 1  # Fallback
+
+                # Only count full days for display
+                full_days_active = int(days_elapsed)
 
                 # Calculate total earnings using advanced P&L calculator
                 # Generate synthetic market data for demonstration
@@ -243,9 +245,6 @@ async def get_my_strategies():
                      performance.max_drawdown, performance.calmar_ratio, performance.omega_ratio,
                      performance.win_rate, performance.profit_factor, performance.expectancy,
                      performance.recovery_factor, performance.ulcer_index, performance.tail_ratio)
-
-                # Only count full days for display
-                full_days_active = int(days_elapsed)
 
                 my_strategies.append({
                     'subscription_id': row['id'],

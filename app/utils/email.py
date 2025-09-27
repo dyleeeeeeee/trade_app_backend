@@ -1,7 +1,8 @@
-import aiohttp
+import aiosmtplib
 from email.message import EmailMessage
 from quart import current_app
 import asyncio
+from mailersend import MailerSendClient, EmailBuilder
 
 # RAILWAY SMTP SETUP GUIDE:
 #
@@ -58,49 +59,37 @@ class EmailService:
             # Don't raise exception - email failure shouldn't break the app
 
     async def _send_via_mailersend(self, config, to_email: str, subject: str, body: str):
-        """Send email using MailerSend API"""
-        url = "https://api.mailersend.com/v1/email"
-
-        payload = {
-            "from": {
-                "email": config['email_from'],
-                "name": config['email_from_name']
-            },
-            "to": [{
-                "email": to_email
-            }],
-            "subject": subject,
-            "text": body,
-            "html": f"<pre>{body}</pre>"  # Convert plain text to simple HTML
-        }
-
-        headers = {
-            "Authorization": f"Bearer {config['mailersend_token']}",
-            "Content-Type": "application/json"
-        }
-
-        timeout = 30  # 30 second timeout
+        """Send email using MailerSend SDK"""
         try:
-            async with asyncio.timeout(timeout):
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers) as response:
-                        if response.status == 202:
-                            print(f"Email sent successfully via MailerSend to {to_email}")
-                            return True
-                        elif response.status == 422:
-                            error_data = await response.json()
-                            print(f"MailerSend validation error for {to_email}: {error_data}")
-                            raise Exception(f"Validation error: {error_data}")
-                        else:
-                            error_text = await response.text()
-                            print(f"MailerSend API error for {to_email} (status {response.status}): {error_text}")
-                            raise Exception(f"API error: {error_text}")
+            # Initialize MailerSend client
+            ms = MailerSendClient(api_key=config['mailersend_token'])
 
-        except asyncio.TimeoutError:
-            print(f"MailerSend API timed out for {to_email}")
-            raise Exception("Timeout")
+            # Build email using the official SDK
+            email = (EmailBuilder()
+                     .from_email(config['email_from'], config['email_from_name'])
+                     .to_many([{"email": to_email}])
+                     .subject(subject)
+                     .html(f"<div style='font-family: Arial, sans-serif; white-space: pre-line;'>{body}</div>")
+                     .text(body)
+                     .build())
+
+            # Send email using asyncio.to_thread since SDK is synchronous
+            response = await asyncio.to_thread(ms.emails.send, email)
+
+            # Check response
+            if response.success:
+                # Extract message ID if available
+                message_id = getattr(response, 'headers', {}).get('x-message-id', 'unknown')
+                print(f"Email sent successfully via MailerSend SDK to {to_email} (ID: {message_id})")
+                return True
+            else:
+                error_msg = getattr(response, 'data', {}).get('message', 'Unknown error')
+                status_code = getattr(response, 'status_code', 'unknown')
+                print(f"MailerSend SDK error for {to_email} (status {status_code}): {error_msg}")
+                raise Exception(f"API error ({status_code}): {error_msg}")
+
         except Exception as e:
-            print(f"MailerSend API failed for {to_email}: {str(e)}")
+            print(f"MailerSend SDK failed for {to_email}: {str(e)}")
             raise
 
     async def _send_via_smtp(self, config, to_email: str, subject: str, body: str):

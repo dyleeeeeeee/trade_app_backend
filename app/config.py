@@ -42,5 +42,5 @@ class QuartConfig:
     SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
     SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
     SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
-    EMAIL_FROM = os.getenv('EMAIL_FROM', 'noreply@astridglobal.com')
+    EMAIL_FROM = os.getenv('EMAIL_FROM', 'admin@astridglobal.com')
     EMAIL_FROM_NAME = os.getenv('EMAIL_FROM_NAME', 'Astrid Global Ltd')

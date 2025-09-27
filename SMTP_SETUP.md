@@ -15,12 +15,19 @@ MAILERSEND_TOKEN=your_actual_api_token_here
 
 ### Optional: Configure From Email
 ```bash
-EMAIL_FROM=noreply@yourdomain.com
+EMAIL_FROM=admin@astridgloballtd.pro
 EMAIL_FROM_NAME=Astrid Global Ltd
 ```
 
-## 📧 How It Works:
-- ✅ **MailerSend API first** - Fast, reliable HTTP requests
+## 📧 **Implementation Details:**
+- ✅ **Official MailerSend SDK v2** - Uses `mailersend` Python package
+- ✅ **Async integration** - Uses `asyncio.to_thread()` for Quart compatibility  
+- ✅ **HTML & Text content** - Both formats supported with proper formatting
+- ✅ **Error handling** - SDK provides comprehensive error reporting
+- ✅ **Message tracking** - Extracts `x-message-id` from responses
+
+## 📧 **How It Works:**
+- ✅ **MailerSend API first** - Official SDK for reliability
 - ✅ **SMTP fallback** - If MailerSend fails or isn't configured
 - ✅ **No timeouts** - HTTP requests work perfectly on Railway
 - ✅ **Development mode** - Skips emails if no configuration

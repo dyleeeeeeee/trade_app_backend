@@ -1,4 +1,4 @@
-from quart import Quart, request, jsonify, g
+from quart import Quart, request, jsonify, g, current_app
 from quart_cors import cors
 from functools import wraps
 from quart_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
@@ -22,7 +22,7 @@ def jwt_required_custom(f):
             user_id = get_jwt_identity()
 
             # Check if user account is blocked
-            async with request.app.db_pool.acquire() as conn:
+            async with current_app.db_pool.acquire() as conn:
                 user = await conn.fetchrow('SELECT is_blocked FROM users WHERE id = $1', int(user_id))
                 if user and user['is_blocked']:
                     return jsonify({'message': 'Your account has been blocked. Please contact support.'}), 403
@@ -45,7 +45,7 @@ def admin_required(f):
             user_id = get_jwt_identity()
             
             # Check if user is admin
-            async with request.app.db_pool.acquire() as conn:
+            async with current_app.db_pool.acquire() as conn:
                 user = await conn.fetchrow('SELECT role FROM users WHERE id = $1', int(user_id))
                 if not user or user['role'] != 'admin':
                     return jsonify({'message': 'Admin access required'}), 403

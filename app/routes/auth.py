@@ -1,4 +1,4 @@
-from quart import Blueprint, request, jsonify, current_app
+from quart import Blueprint, request, jsonify, current_app, g
 from quart_jwt_extended import create_access_token, verify_jwt_in_request, get_jwt_identity
 from ..middleware import jwt_required_custom
 from ..utils.email import email_service

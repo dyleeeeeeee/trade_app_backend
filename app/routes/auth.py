@@ -26,7 +26,7 @@ async def login():
             # Create long-lived JWT token (24 hours)
             access_token = create_access_token(identity=str(user['id']), expires_delta=timedelta(hours=24))
 
-            print(f"DEBUG: Created JWT token for user_id = {user['id']}")  # Debug log
+            print(f"DEBUG: Created JWT token for user_id = {user['id']} with secret key: {current_app.config.get('JWT_SECRET_KEY', 'NOT SET')}")  # Debug log
 
             # Send login notification email (don't await to avoid blocking login)
             import asyncio
@@ -67,6 +67,8 @@ async def signup():
 
         # Create long-lived JWT token (24 hours)
         access_token = create_access_token(identity=str(user['id']), expires_delta=timedelta(hours=24))
+
+        print(f"DEBUG: Created JWT token for new user_id = {user['id']} with secret key: {current_app.config.get('JWT_SECRET_KEY', 'NOT SET')}")
 
         # Send welcome email (don't await to avoid blocking signup)
         import asyncio

@@ -18,7 +18,9 @@ class App(Quart):
         self.secret_key = QuartConfig().SECRET_KEY
         
         # Initialize JWT
-        self.config['JWT_SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+        secret_key = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
+        print(f"DEBUG: JWT_SECRET_KEY = {secret_key}")
+        self.config['JWT_SECRET_KEY'] = secret_key
         jwt = JWTManager(self)
 
         self.db_pool = None

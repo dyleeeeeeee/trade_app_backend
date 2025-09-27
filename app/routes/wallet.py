@@ -10,9 +10,9 @@ async def get_balance():
     user_id = g.user_id
 
     async with current_app.db_pool.acquire() as conn:
-        # Get the most recent balance_after
+        # Get the most recent balance_after and profit_after
         result = await conn.fetchrow('''
-            SELECT balance_after
+            SELECT balance_after, profit_after
             FROM wallet_transactions
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -20,8 +20,12 @@ async def get_balance():
         ''', user_id)
 
         balance = float(result['balance_after']) if result else 0.0
+        profit = float(result['profit_after']) if result else 0.0
 
-        return jsonify({'balance': balance}), 200
+        return jsonify({
+            'balance': balance,
+            'profit': profit
+        }), 200
 
 @wallet_bp.route('/deposit', methods=['POST'])
 @jwt_required_custom

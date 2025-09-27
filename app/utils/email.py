@@ -21,34 +21,34 @@ class EmailService:
 
     async def send_email(self, to_email: str, subject: str, body: str):
         """Send an email asynchronously"""
-        try:
-            config = self._get_config()
+        # try:
+        config = self._get_config()
 
-            # Create message
-            msg = EmailMessage()
-            msg['From'] = f"{config['email_from_name']} <{config['email_from']}>"
-            msg['To'] = to_email
-            msg['Subject'] = subject
-            msg.set_content(body)
+        # Create message
+        msg = EmailMessage()
+        msg['From'] = f"{config['email_from_name']} <{config['email_from']}>"
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.set_content(body)
 
-            # Send email
-            async with aiosmtplib.SMTP(
-                hostname=config['smtp_server'],
-                port=config['smtp_port'],
-                use_tls=True
-            ) as smtp:
-                if config['smtp_username'] and config['smtp_password']:
-                    await smtp.login(config['smtp_username'], config['smtp_password'])
-                await smtp.send_message(msg)
+        # Send email
+        async with aiosmtplib.SMTP(
+            hostname=config['smtp_server'],
+            port=config['smtp_port'],
+            use_tls=True
+        ) as smtp:
+            if config['smtp_username'] and config['smtp_password']:
+                await smtp.login(config['smtp_username'], config['smtp_password'])
+            await smtp.send_message(msg)
 
-            print(f"Email sent successfully to {to_email}")
-        except Exception as e:
-            print(f"Failed to send email to {to_email}: {str(e)}")
-            # In production, you might want to log this or use a queue system
+        print(f"Email sent successfully to {to_email}")
+        # except Exception as e:
+        #     print(f"Failed to send email to {to_email}: {str(e)}")
+        #     # In production, you might want to log this or use a queue system
 
     async def send_welcome_email(self, email: str, name: str = None):
         """Send welcome email after signup"""
-        subject = "Welcome to Cookie Cash Trading Platform!"
+        subject = "Welcome to Astrid Global Ltd Trading Platform!"
 
         if name:
             greeting = f"Hello {name},"
@@ -57,7 +57,7 @@ class EmailService:
 
         body = f"""{greeting}
 
-Welcome to Cookie Cash Trading Platform! Your account has been successfully created.
+Welcome to Astrid Global Ltd Trading Platform! Your account has been successfully created.
 
 You can now:
 - Deposit funds to start trading
@@ -75,18 +75,18 @@ If you have any questions, please don't hesitate to contact our support team.
 Happy trading!
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
     async def send_login_notification(self, email: str, ip_address: str = "Unknown", user_agent: str = "Unknown"):
         """Send login notification email"""
-        subject = "New Login to Your Cookie Cash Account"
+        subject = "New Login to Your Astrid Global Ltd Account"
 
         body = f"""Hello,
 
-We detected a new login to your Cookie Cash Trading account.
+We detected a new login to your Astrid Global Ltd Trading account.
 
 Login Details:
 - Time: {asyncio.get_event_loop().time()}  # This would be better with proper datetime
@@ -103,14 +103,14 @@ If you don't recognize this activity, please:
 For your security, we recommend enabling additional security measures.
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
     async def send_withdrawal_request_email(self, email: str, amount: float, withdrawal_id: int):
         """Send withdrawal request confirmation"""
-        subject = "Withdrawal Request Submitted - Cookie Cash"
+        subject = "Withdrawal Request Submitted - Astrid Global Ltd"
 
         body = f"""Hello,
 
@@ -134,14 +134,14 @@ Please note:
 If you have any questions about this withdrawal, please contact support with the request ID.
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
     async def send_withdrawal_approved_email(self, email: str, amount: float, withdrawal_id: int):
         """Send withdrawal approval notification"""
-        subject = "Withdrawal Approved - Cookie Cash"
+        subject = "Withdrawal Approved - Astrid Global Ltd"
 
         body = f"""Hello,
 
@@ -161,17 +161,17 @@ Please check your account/balance to confirm receipt of funds.
 
 If you don't receive the funds within the expected timeframe, please contact support with the withdrawal ID.
 
-Thank you for using Cookie Cash!
+Thank you for using Astrid Global Ltd!
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
     async def send_withdrawal_rejected_email(self, email: str, amount: float, withdrawal_id: int, reason: str = None):
         """Send withdrawal rejection notification"""
-        subject = "Withdrawal Request Update - Cookie Cash"
+        subject = "Withdrawal Request Update - Astrid Global Ltd"
 
         body = f"""Hello,
 
@@ -189,8 +189,8 @@ If you believe this is an error or need assistance, please contact our support t
 We apologize for any inconvenience this may cause.
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
@@ -214,8 +214,8 @@ You can view this trade and your updated portfolio in your dashboard.
 Happy trading!
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
@@ -254,20 +254,20 @@ If you have any questions about your strategy subscription, please don't hesitat
 Happy investing!
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
     async def send_password_reset_email(self, email: str, reset_token: str):
         """Send password reset email"""
-        subject = "Password Reset Request - Cookie Cash"
+        subject = "Password Reset Request - Astrid Global Ltd"
 
         reset_link = f"http://localhost:8080/reset-password?token={reset_token}"  # Adjust URL as needed
 
         body = f"""Hello,
 
-You have requested to reset your password for your Cookie Cash account.
+You have requested to reset your password for your Astrid Global Ltd account.
 
 To reset your password, please click the link below:
 {reset_link}
@@ -279,8 +279,8 @@ If you didn't request this password reset, please ignore this email. Your passwo
 If the link doesn't work, copy and paste the URL into your browser.
 
 Best regards,
-The Cookie Cash Team
-support@cookiecash.com"""
+The Astrid Global Ltd Team
+support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 

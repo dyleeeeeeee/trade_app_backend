@@ -1,6 +1,8 @@
 from quart import Blueprint, request, jsonify, current_app, g
 from ..middleware import jwt_required_custom, admin_required
 from ..utils.email import email_service
+from ..utils.pandl_calculator import economic_calculator, TradeMetrics, MarketRegime
+import random
 
 strategy_bp = Blueprint('strategy', __name__)
 
@@ -162,17 +164,85 @@ async def get_my_strategies():
                 else:
                     days_elapsed = 1  # Fallback
 
-                # Calculate total earnings: daily_roi_rate * invested_amount * days_elapsed
-                # Add some randomization for realism (±20%)
-                import random
-                variance_factor = 0.8 + (random.random() * 0.4)  # Between 0.8 and 1.2
-                base_daily_earnings = daily_roi_rate * invested_amount
-                actual_daily_earnings = base_daily_earnings * variance_factor
+                # Calculate total earnings using advanced P&L calculator
+                # Generate synthetic market data for demonstration
+                days_active = full_days_active
+                if days_active == 0:
+                    days_active = 1
 
-                # Ensure minimum earnings
-                actual_daily_earnings = max(actual_daily_earnings, invested_amount * 0.0001)
+                # Create synthetic daily returns based on strategy performance
+                daily_returns = []
+                base_daily_return = daily_roi_rate
 
-                total_earnings = actual_daily_earnings * days_elapsed
+                # Add volatility and market regime effects
+                for day in range(days_active):
+                    # Simulate market volatility
+                    volatility_factor = 0.8 + (random.random() * 0.4)  # 0.8 to 1.2
+                    regime_factor = 1.0
+
+                    # Simulate different market regimes
+                    regime_roll = random.random()
+                    if regime_roll < 0.1:  # 10% chance of bear market
+                        regime_factor = 0.7
+                    elif regime_roll < 0.25:  # 15% chance of volatile market
+                        regime_factor = 1.3
+                    elif regime_roll < 0.6:  # 35% chance of bull market
+                        regime_factor = 1.1
+
+                    daily_return = base_daily_return * volatility_factor * regime_factor
+                    daily_returns.append(daily_return)
+
+                # Use advanced calculator for strategy performance
+                performance = economic_calculator.calculate_strategy_performance_economics(
+                    daily_returns, invested_amount, {
+                        'time_period_days': days_active,
+                        'risk_free_rate': 0.02,
+                        'benchmark_return': 0.05,  # Market benchmark
+                        'market_beta': 1.2,  # Strategy beta
+                        'market_return': 0.06
+                    }
+                )
+
+                # Calculate total earnings with advanced metrics
+                total_earnings = invested_amount * performance.total_return
+
+                # Ensure minimum earnings (guarantee)
+                total_earnings = max(total_earnings, invested_amount * 0.0001 * days_active)
+
+                # Store advanced performance metrics in database
+                await conn.execute('''
+                    INSERT INTO strategy_performance (
+                        strategy_subscription_id, user_id, invested_amount, current_value,
+                        realized_profits, unrealized_profits, total_return, annualized_return,
+                        volatility, sharpe_ratio, sortino_ratio, max_drawdown, calmar_ratio,
+                        omega_ratio, win_rate, profit_factor, expectancy, recovery_factor,
+                        ulcer_index, tail_ratio
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                    ON CONFLICT (strategy_subscription_id) DO UPDATE SET
+                        current_value = EXCLUDED.current_value,
+                        realized_profits = EXCLUDED.realized_profits,
+                        unrealized_profits = EXCLUDED.unrealized_profits,
+                        total_return = EXCLUDED.total_return,
+                        annualized_return = EXCLUDED.annualized_return,
+                        volatility = EXCLUDED.volatility,
+                        sharpe_ratio = EXCLUDED.sharpe_ratio,
+                        sortino_ratio = EXCLUDED.sortino_ratio,
+                        max_drawdown = EXCLUDED.max_drawdown,
+                        calmar_ratio = EXCLUDED.calmar_ratio,
+                        omega_ratio = EXCLUDED.omega_ratio,
+                        win_rate = EXCLUDED.win_rate,
+                        profit_factor = EXCLUDED.profit_factor,
+                        expectancy = EXCLUDED.expectancy,
+                        recovery_factor = EXCLUDED.recovery_factor,
+                        ulcer_index = EXCLUDED.ulcer_index,
+                        tail_ratio = EXCLUDED.tail_ratio,
+                        last_updated = CURRENT_TIMESTAMP
+                ''', row['id'], user_id, invested_amount, invested_amount + total_earnings,
+                     total_earnings, 0, performance.total_return, performance.annualized_return,
+                     performance.volatility, performance.sharpe_ratio, performance.sortino_ratio,
+                     performance.max_drawdown, performance.calmar_ratio, performance.omega_ratio,
+                     performance.win_rate, performance.profit_factor, performance.expectancy,
+                     performance.recovery_factor, performance.ulcer_index, performance.tail_ratio)
 
                 # Only count full days for display
                 full_days_active = int(days_elapsed)
@@ -223,22 +293,24 @@ async def subscribe_to_strategy(strategy_id):
             if strategy['max_investment'] and invested_amount > float(strategy['max_investment']):
                 return jsonify({'error': f'Maximum investment is ${strategy["max_investment"]}'}), 400
 
-            # Check user's wallet balance
+            # Check user's wallet balance and profit
             balance_row = await conn.fetchrow('''
                 SELECT balance_after FROM wallet_transactions
                 WHERE user_id = $1
                 ORDER BY created_at DESC LIMIT 1
             ''', user_id)
 
+            profit_row = await conn.fetchrow('''
+                SELECT profit_after FROM wallet_transactions
+                WHERE user_id = $1
+                ORDER BY created_at DESC LIMIT 1
+            ''', user_id)
+
             current_balance = float(balance_row['balance_after']) if balance_row else 0
+            current_profit = float(profit_row['profit_after']) if profit_row else 0
 
             if current_balance < invested_amount:
                 return jsonify({'error': 'Insufficient balance'}), 400
-
-            # Check if user is already subscribed
-            existing = await conn.fetchrow('SELECT id FROM strategy_subscriptions WHERE user_id = $1 AND strategy_id = $2 AND is_active = true', user_id, strategy_id)
-            if existing:
-                return jsonify({'error': 'Already subscribed to this strategy'}), 400
 
             # Create subscription
             subscription_id = await conn.fetchval('''
@@ -249,15 +321,13 @@ async def subscribe_to_strategy(strategy_id):
 
             # Deduct from wallet
             await conn.execute('''
-                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after)
-                VALUES ($1, 'strategy_investment', $2, $3, $4)
-            ''', user_id, -invested_amount, current_balance, current_balance - invested_amount)
+                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after, profit_before, profit_after)
+                VALUES ($1, 'strategy_investment', $2, $3, $4, $5, $6)
+            ''', user_id, -invested_amount, current_balance, current_balance - invested_amount, current_profit, current_profit)
 
             # Get user email for notification
             user_email_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
             user_email = user_email_row['email'] if user_email_row else None
-            
-            # Send subscription confirmation email (don't await to avoid blocking)
             import asyncio
             asyncio.create_task(email_service.send_strategy_subscription_email(
                 user_email, strategy['name'], float(invested_amount), 
@@ -291,9 +361,8 @@ async def unsubscribe_from_strategy(strategy_id):
             if not subscription:
                 return jsonify({'error': 'No active subscription found'}), 404
 
-            # Calculate total earnings based on time elapsed
+            # Calculate total earnings based on time elapsed using advanced calculator
             invested_amount = float(subscription['invested_amount'])
-            daily_roi_rate = float(subscription['expected_roi']) / 100  # Convert percentage to decimal
             subscribed_at = subscription['subscribed_at']
 
             from datetime import datetime, timezone
@@ -305,23 +374,58 @@ async def unsubscribe_from_strategy(strategy_id):
             else:
                 days_elapsed = 1  # Fallback
 
-            # Calculate total earnings with randomization
+            # Generate synthetic returns for advanced calculation
+            days_active = max(1, int(days_elapsed))
+            daily_returns = []
+            daily_roi_rate = float(subscription['expected_roi']) / 100
+
             import random
-            variance_factor = 0.8 + (random.random() * 0.4)  # Between 0.8 and 1.2
-            base_daily_earnings = daily_roi_rate * invested_amount
-            actual_daily_earnings = base_daily_earnings * variance_factor
-            actual_daily_earnings = max(actual_daily_earnings, invested_amount * 0.0001)
-            total_earnings = actual_daily_earnings * days_elapsed
+            for day in range(days_active):
+                volatility_factor = 0.8 + (random.random() * 0.4)
+                regime_factor = 1.0
+
+                regime_roll = random.random()
+                if regime_roll < 0.1:
+                    regime_factor = 0.7
+                elif regime_roll < 0.25:
+                    regime_factor = 1.3
+                elif regime_roll < 0.6:
+                    regime_factor = 1.1
+
+                daily_return = daily_roi_rate * volatility_factor * regime_factor
+                daily_returns.append(daily_return)
+
+            # Use advanced calculator
+            performance = economic_calculator.calculate_strategy_performance_economics(
+                daily_returns, invested_amount, {
+                    'time_period_days': days_active,
+                    'risk_free_rate': 0.02,
+                    'benchmark_return': 0.05,
+                    'market_beta': 1.2,
+                    'market_return': 0.06
+                }
+            )
+
+            total_earnings = invested_amount * performance.total_return
+            total_earnings = max(total_earnings, invested_amount * 0.0001 * days_active)
 
             return_amount = invested_amount + total_earnings
 
-            # Get current balance
+            # Get current balance and profit
             balance_row = await conn.fetchrow('''
                 SELECT balance_after FROM wallet_transactions
                 WHERE user_id = $1
                 ORDER BY created_at DESC LIMIT 1
             ''', user_id)
+
+            profit_row = await conn.fetchrow('''
+                SELECT profit_after FROM wallet_transactions
+                WHERE user_id = $1
+                ORDER BY created_at DESC LIMIT 1
+            ''', user_id)
+
             current_balance = float(balance_row['balance_after']) if balance_row else 0
+            current_profit = float(profit_row['profit_after']) if profit_row else 0
 
             # Update subscription as inactive
             await conn.execute('''
@@ -332,9 +436,9 @@ async def unsubscribe_from_strategy(strategy_id):
 
             # Return invested amount + earnings to wallet
             await conn.execute('''
-                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after)
-                VALUES ($1, 'strategy_unsubscription', $2, $3, $4)
-            ''', user_id, return_amount, current_balance, current_balance + return_amount)
+                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after, profit_before, profit_after)
+                VALUES ($1, 'strategy_unsubscription', $2, $3, $4, $5, $6)
+            ''', user_id, return_amount, current_balance, current_balance + return_amount, current_profit, current_profit)
 
             return jsonify({
                 'message': f'Successfully unsubscribed from {subscription["name"]}',

@@ -110,7 +110,7 @@ async def update_user_balance(user_id):
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
-            # Get current balance - use the most recent balance_after
+            # Get current balance and profit
             current_balance_result = await conn.fetchrow('''
                 SELECT balance_after
                 FROM wallet_transactions
@@ -119,7 +119,16 @@ async def update_user_balance(user_id):
                 LIMIT 1
             ''', user_id)
 
+            current_profit_result = await conn.fetchrow('''
+                SELECT profit_after
+                FROM wallet_transactions
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', user_id)
+
             current_balance = float(current_balance_result['balance_after']) if current_balance_result else 0.0
+            current_profit = float(current_profit_result['profit_after']) if current_profit_result else 0.0
 
             # Calculate adjustment amount
             adjustment = new_balance - current_balance
@@ -129,9 +138,9 @@ async def update_user_balance(user_id):
                 transaction_type = 'admin_adjustment_positive' if adjustment > 0 else 'admin_adjustment_negative'
 
                 await conn.execute('''
-                    INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after)
-                    VALUES ($1, $2, $3, $4, $5)
-                ''', user_id, transaction_type, abs(adjustment), current_balance, new_balance)
+                    INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after, profit_before, profit_after)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ''', user_id, transaction_type, abs(adjustment), current_balance, new_balance, current_profit, current_profit)
 
             return jsonify({
                 'message': 'User balance updated successfully',
@@ -156,3 +165,84 @@ async def get_user_balance(user_id):
         balance = float(result['balance_after']) if result else 0.0
 
         return jsonify({'balance': balance}), 200
+
+@admin_bp.route('/admin/users/<int:user_id>/profit', methods=['POST'])
+@admin_required
+async def update_user_profit(user_id):
+    data = await request.get_json()
+    new_profit = data.get('profit', 0)
+
+    if new_profit < 0:
+        return jsonify({'message': 'Profit cannot be negative'}), 400
+
+    async with current_app.db_pool.acquire() as conn:
+        async with conn.transaction():
+            # Get current profit - use the most recent profit_after
+            current_profit_result = await conn.fetchrow('''
+                SELECT profit_after
+                FROM wallet_transactions
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', user_id)
+
+            current_profit = float(current_profit_result['profit_after']) if current_profit_result else 0.0
+
+            # Get current balance for reference
+            current_balance_result = await conn.fetchrow('''
+                SELECT balance_after
+                FROM wallet_transactions
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', user_id)
+
+            current_balance = float(current_balance_result['balance_after']) if current_balance_result else 0.0
+
+            # Calculate adjustment amount
+            adjustment = new_profit - current_profit
+
+            if adjustment != 0:
+                # Add adjustment transaction
+                transaction_type = 'profit_adjustment_positive' if adjustment > 0 else 'profit_adjustment_negative'
+
+                await conn.execute('''
+                    INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after, profit_before, profit_after)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ''', user_id, transaction_type, abs(adjustment), current_balance, current_balance, current_profit, new_profit)
+
+                # Update profit snapshots for advanced tracking
+                await conn.execute('''
+                    INSERT INTO profit_snapshots (user_id, total_profit, strategy_profits, trading_profits, subscription_profits)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (user_id, snapshot_date)
+                    DO UPDATE SET
+                        total_profit = EXCLUDED.total_profit,
+                        strategy_profits = EXCLUDED.strategy_profits,
+                        trading_profits = EXCLUDED.trading_profits,
+                        subscription_profits = EXCLUDED.subscription_profits
+                ''', user_id, new_profit, 0, 0, 0)
+
+            return jsonify({
+                'message': 'User profit updated successfully',
+                'previous_profit': current_profit,
+                'new_profit': new_profit,
+                'adjustment': adjustment
+            }), 200
+
+@admin_bp.route('/admin/users/<int:user_id>/profit-info', methods=['GET'])
+@admin_required
+async def get_user_profit(user_id):
+    async with current_app.db_pool.acquire() as conn:
+        # Get the most recent profit_after
+        result = await conn.fetchrow('''
+            SELECT profit_after
+            FROM wallet_transactions
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+        ''', user_id)
+
+        profit = float(result['profit_after']) if result else 0.0
+
+        return jsonify({'profit': profit}), 200

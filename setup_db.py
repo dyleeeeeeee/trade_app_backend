@@ -37,55 +37,15 @@ async def setup_database():
 
         # Try to create tables (this may fail due to Supabase RLS/policies)
         try:
-            await conn.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    password VARCHAR(255) NOT NULL,
-                    role VARCHAR(50) DEFAULT 'user',
-                    is_blocked BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+            # Read the entire schema file and execute it as one command
+            schema_path = os.path.join(os.path.dirname(__file__), 'supabase_schema.sql')
+            with open(schema_path, 'r', encoding='utf-8') as f:
+                schema_sql = f.read()
 
-                CREATE TABLE IF NOT EXISTS wallet_transactions (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
-                    transaction_type VARCHAR(50) NOT NULL,
-                    amount DECIMAL(20, 8) NOT NULL,
-                    balance_before DECIMAL(20, 8) NOT NULL,
-                    balance_after DECIMAL(20, 8) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+            # Execute the entire schema - let Supabase handle the parsing
+            await conn.execute(schema_sql)
 
-                CREATE TABLE IF NOT EXISTS trades (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
-                    asset VARCHAR(50) NOT NULL,
-                    side VARCHAR(10) NOT NULL,
-                    size DECIMAL(20, 8) NOT NULL,
-                    price DECIMAL(20, 8) NOT NULL,
-                    total DECIMAL(20, 8) NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS withdrawals (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER REFERENCES users(id),
-                    amount DECIMAL(20, 8) NOT NULL,
-                    status VARCHAR(50) DEFAULT 'pending',
-                    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-
-                CREATE TABLE IF NOT EXISTS copy_trading_subscriptions (
-                    id SERIAL PRIMARY KEY,
-                    follower_id INTEGER REFERENCES users(id),
-                    trader_id VARCHAR(100) NOT NULL,
-                    allocation DECIMAL(5, 2) NOT NULL,
-                    is_active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            ''')
-            print("✅ Database tables created successfully")
+            print("✅ Database schema executed successfully from supabase_schema.sql")
         except Exception as e:
             print(f"⚠️  Table creation may have failed: {str(e)}")
             print("💡 You may need to create tables manually in Supabase SQL Editor")

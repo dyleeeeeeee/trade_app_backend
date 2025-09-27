@@ -36,7 +36,7 @@ async def deposit():
 
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
-            # Get current balance
+            # Get current balance and profit
             balance_result = await conn.fetchrow('''
                 SELECT balance_after
                 FROM wallet_transactions
@@ -45,14 +45,23 @@ async def deposit():
                 LIMIT 1
             ''', user_id)
 
+            profit_result = await conn.fetchrow('''
+                SELECT profit_after
+                FROM wallet_transactions
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            ''', user_id)
+
             balance_before = float(balance_result['balance_after']) if balance_result else 0.0
+            profit_before = float(profit_result['profit_after']) if profit_result else 0.0
             balance_after = balance_before + amount
 
             # Insert transaction
             await conn.execute('''
-                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after)
-                VALUES ($1, 'deposit', $2, $3, $4)
-            ''', user_id, amount, balance_before, balance_after)
+                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after, profit_before, profit_after)
+                VALUES ($1, 'deposit', $2, $3, $4, $5, $6)
+            ''', user_id, amount, balance_before, balance_after, profit_before, profit_before)
 
             return jsonify({'message': 'Deposit successful', 'balance': balance_after}), 200
 

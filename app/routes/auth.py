@@ -19,6 +19,10 @@ async def login():
         user = await conn.fetchrow('SELECT * FROM users WHERE email = $1', email)
 
         if user and user['password'] == password:  # Simple password check (no hashing as requested)
+            # Check if user account is blocked
+            if user['is_blocked']:
+                return jsonify({'message': 'Your account has been blocked. Please contact support.'}), 403
+            
             # Create long-lived JWT token (24 hours)
             access_token = create_access_token(identity=str(user['id']), expires_delta=timedelta(hours=24))
 

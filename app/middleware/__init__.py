@@ -20,6 +20,13 @@ def jwt_required_custom(f):
         try:
             await verify_jwt_in_request()
             user_id = get_jwt_identity()
+            
+            # Check if user account is blocked
+            async with request.app.db_pool.acquire() as conn:
+                user = await conn.fetchrow('SELECT is_blocked FROM users WHERE id = $1', int(user_id))
+                if user and user['is_blocked']:
+                    return jsonify({'message': 'Your account has been blocked. Please contact support.'}), 403
+            
             # Store user_id in g for access in route handlers
             g.user_id = int(user_id)
             return await f(*args, **kwargs)

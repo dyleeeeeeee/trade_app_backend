@@ -346,6 +346,47 @@ class BeckerHumanCapital:
 
         return 1 - efficiency_penalty
 
+class ChineseQuantitativeAnalysis:
+    """
+    Chinese quantitative methods for market regime analysis
+    Focus on technical patterns, momentum, and market structure
+    """
+
+    @staticmethod
+    def calculate_market_regime(prices: List[float], volumes: List[float]) -> MarketRegime:
+        """
+        Determine market regime using technical analysis
+        """
+        if len(prices) < 5:
+            return MarketRegime.HAYEKIAN_ORDER
+
+        # Calculate trend strength
+        recent_prices = prices[-10:] if len(prices) >= 10 else prices
+        price_trend = (recent_prices[-1] - recent_prices[0]) / recent_prices[0]
+
+        # Calculate volatility
+        returns = [recent_prices[i]/recent_prices[i-1] - 1 for i in range(1, len(recent_prices))]
+        volatility = np.std(returns) if returns else 0
+
+        # Volume confirmation
+        avg_volume = np.mean(volumes) if volumes else 1
+        recent_volume = volumes[-1] if volumes else 1
+        volume_ratio = recent_volume / avg_volume if avg_volume > 0 else 1
+
+        # Regime determination logic
+        if price_trend > 0.05 and volatility > 0.03 and volume_ratio > 1.2:
+            return MarketRegime.SCHUMPETER_CREATIVE_DESTRUCTION  # Strong bull market
+        elif price_trend < -0.05 and volatility > 0.04:
+            return MarketRegime.MINSKY_MOMENT  # Bear market/crisis
+        elif volatility > 0.06:
+            return MarketRegime.TALEBS_BLACK_SWAN  # High uncertainty
+        elif price_trend > 0.02 and volume_ratio > 1.1:
+            return MarketRegime.KEYNESIAN_RECOVERY  # Recovery phase
+        elif volatility < 0.02:
+            return MarketRegime.FRIEDMAN_STAGFLATION  # Stagnant market
+        else:
+            return MarketRegime.HAYEKIAN_ORDER  # Normal market conditions
+
 class CoaseTransactionCosts:
     """
     Ronald Coase: Transaction costs determine economic organization
@@ -397,6 +438,7 @@ class AdvancedEconomicCalculator:
         self.schumpeter = SchumpeterCreativeDestruction()
         self.becker = BeckerHumanCapital()
         self.coase = CoaseTransactionCosts()
+        self.chinese_calc = ChineseQuantitativeAnalysis()
 
     def calculate_comprehensive_pnl(self, trade_metrics: TradeMetrics,
                                    market_data: Dict,
@@ -541,17 +583,17 @@ class AdvancedEconomicCalculator:
 
         calmar_ratio = annualized_return / max_dd if max_dd > 0 else 0
 
-        # Omega ratio (Shadwick & Keating)
+        # Omega ratio (Shadwick & Keating) - bounded to prevent infinity
         upside_returns = [r for r in returns if r > 0]
         downside_sum = abs(sum(downside_returns)) if downside_returns else 0
         upside_sum = sum(upside_returns) if upside_returns else 0
-        omega_ratio = upside_sum / downside_sum if downside_sum > 0 else float('inf')
+        omega_ratio = upside_sum / downside_sum if downside_sum > 0 else 999.99  # Cap at reasonable max
 
-        # Win rate and profit factor
+        # Win rate and profit factor - bounded to prevent infinity
         win_rate = len([r for r in returns if r > 0]) / len(returns) * 100
         gross_profit = sum(r for r in returns if r > 0)
         gross_loss = abs(sum(r for r in returns if r < 0))
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf')
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.99  # Cap at reasonable max
 
         # Expectancy (Kahneman behavioral considerations)
         avg_win = gross_profit / len(upside_returns) if upside_returns else 0

@@ -128,8 +128,31 @@ CREATE TABLE IF NOT EXISTS strategy_performance (
     recovery_factor DECIMAL(10, 6) DEFAULT 0,
     ulcer_index DECIMAL(10, 6) DEFAULT 0,
     tail_ratio DECIMAL(10, 6) DEFAULT 0,
-    last_updated TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+    last_updated TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
+    UNIQUE(strategy_subscription_id)  -- Add unique constraint for UPSERT
 );
+
+-- Add unique constraint to existing table if it doesn't exist
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'strategy_performance_strategy_subscription_id_key'
+    ) THEN
+        -- First, remove duplicates keeping only the most recent record
+        DELETE FROM strategy_performance 
+        WHERE id NOT IN (
+            SELECT DISTINCT ON (strategy_subscription_id) id
+            FROM strategy_performance 
+            ORDER BY strategy_subscription_id, last_updated DESC
+        );
+        
+        -- Then add the unique constraint
+        ALTER TABLE strategy_performance 
+        ADD CONSTRAINT strategy_performance_strategy_subscription_id_key 
+        UNIQUE (strategy_subscription_id);
+    END IF;
+END $$;
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

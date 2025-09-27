@@ -212,39 +212,46 @@ async def get_my_strategies():
                 total_earnings = max(total_earnings, invested_amount * 0.0001 * days_active)
 
                 # Store advanced performance metrics in database
-                await conn.execute('''
-                    INSERT INTO strategy_performance (
-                        strategy_subscription_id, user_id, invested_amount, current_value,
-                        realized_profits, unrealized_profits, total_return, annualized_return,
-                        volatility, sharpe_ratio, sortino_ratio, max_drawdown, calmar_ratio,
-                        omega_ratio, win_rate, profit_factor, expectancy, recovery_factor,
-                        ulcer_index, tail_ratio
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-                    ON CONFLICT (strategy_subscription_id) DO UPDATE SET
-                        current_value = EXCLUDED.current_value,
-                        realized_profits = EXCLUDED.realized_profits,
-                        unrealized_profits = EXCLUDED.unrealized_profits,
-                        total_return = EXCLUDED.total_return,
-                        annualized_return = EXCLUDED.annualized_return,
-                        volatility = EXCLUDED.volatility,
-                        sharpe_ratio = EXCLUDED.sharpe_ratio,
-                        sortino_ratio = EXCLUDED.sortino_ratio,
-                        max_drawdown = EXCLUDED.max_drawdown,
-                        calmar_ratio = EXCLUDED.calmar_ratio,
-                        omega_ratio = EXCLUDED.omega_ratio,
-                        win_rate = EXCLUDED.win_rate,
-                        profit_factor = EXCLUDED.profit_factor,
-                        expectancy = EXCLUDED.expectancy,
-                        recovery_factor = EXCLUDED.recovery_factor,
-                        ulcer_index = EXCLUDED.ulcer_index,
-                        tail_ratio = EXCLUDED.tail_ratio,
-                        last_updated = CURRENT_TIMESTAMP
-                ''', row['id'], user_id, invested_amount, invested_amount + total_earnings,
-                     total_earnings, 0, performance.total_return, performance.annualized_return,
-                     performance.volatility, performance.sharpe_ratio, performance.sortino_ratio,
-                     performance.max_drawdown, performance.calmar_ratio, performance.omega_ratio,
-                     performance.win_rate, performance.profit_factor, performance.expectancy,
-                     performance.recovery_factor, performance.ulcer_index, performance.tail_ratio)
+                # First check if record exists, then update or insert accordingly
+                existing_record = await conn.fetchrow('''
+                    SELECT id FROM strategy_performance 
+                    WHERE strategy_subscription_id = $1
+                ''', row['id'])
+
+                if existing_record:
+                    # Update existing record
+                    await conn.execute('''
+                        UPDATE strategy_performance SET
+                            user_id = $2, invested_amount = $3, current_value = $4,
+                            realized_profits = $5, unrealized_profits = $6, total_return = $7, 
+                            annualized_return = $8, volatility = $9, sharpe_ratio = $10,
+                            sortino_ratio = $11, max_drawdown = $12, calmar_ratio = $13,
+                            omega_ratio = $14, win_rate = $15, profit_factor = $16, 
+                            expectancy = $17, recovery_factor = $18, ulcer_index = $19,
+                            tail_ratio = $20, last_updated = CURRENT_TIMESTAMP
+                        WHERE strategy_subscription_id = $1
+                    ''', row['id'], user_id, invested_amount, invested_amount + total_earnings,
+                         total_earnings, 0, performance.total_return, performance.annualized_return,
+                         performance.volatility, performance.sharpe_ratio, performance.sortino_ratio,
+                         performance.max_drawdown, performance.calmar_ratio, performance.omega_ratio,
+                         performance.win_rate, performance.profit_factor, performance.expectancy,
+                         performance.recovery_factor, performance.ulcer_index, performance.tail_ratio)
+                else:
+                    # Insert new record
+                    await conn.execute('''
+                        INSERT INTO strategy_performance (
+                            strategy_subscription_id, user_id, invested_amount, current_value,
+                            realized_profits, unrealized_profits, total_return, annualized_return,
+                            volatility, sharpe_ratio, sortino_ratio, max_drawdown, calmar_ratio,
+                            omega_ratio, win_rate, profit_factor, expectancy, recovery_factor,
+                            ulcer_index, tail_ratio
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                    ''', row['id'], user_id, invested_amount, invested_amount + total_earnings,
+                         total_earnings, 0, performance.total_return, performance.annualized_return,
+                         performance.volatility, performance.sharpe_ratio, performance.sortino_ratio,
+                         performance.max_drawdown, performance.calmar_ratio, performance.omega_ratio,
+                         performance.win_rate, performance.profit_factor, performance.expectancy,
+                         performance.recovery_factor, performance.ulcer_index, performance.tail_ratio)
 
                 my_strategies.append({
                     'subscription_id': row['id'],

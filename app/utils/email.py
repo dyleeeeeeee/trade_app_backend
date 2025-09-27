@@ -37,6 +37,7 @@ class EmailService:
             port=config['smtp_port'],
             use_tls=True
         ) as smtp:
+            await smtp.starttls()
             if config['smtp_username'] and config['smtp_password']:
                 await smtp.login(config['smtp_username'], config['smtp_password'])
             await smtp.send_message(msg)

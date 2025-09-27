@@ -29,12 +29,18 @@ class App(Quart):
             await self.setup()
             await self.create_tables()
 
-        @self.after_serving
         async def cleanup():
-            await self.cleanup()
+            await self.db_pool.close()
 
     async def create_tables(self):
         async with self.db_pool.acquire() as conn:
+            # Run database migration to add missing columns
+            await conn.execute('''
+                ALTER TABLE wallet_transactions
+                ADD COLUMN IF NOT EXISTS profit_before DECIMAL(20, 8) DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS profit_after DECIMAL(20, 8) DEFAULT 0
+            ''')
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -52,6 +58,10 @@ class App(Quart):
                     amount DECIMAL(20, 8) NOT NULL,
                     balance_before DECIMAL(20, 8) NOT NULL,
                     balance_after DECIMAL(20, 8) NOT NULL,
+                    profit_before DECIMAL(20, 8) DEFAULT 0,
+                    profit_after DECIMAL(20, 8) DEFAULT 0,
+                    reference_id VARCHAR(100), -- for trade_id or withdrawal_id
+                    description TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 

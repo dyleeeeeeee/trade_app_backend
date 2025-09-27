@@ -1,7 +1,19 @@
-import aiosmtplib
+import aiohttp
 from email.message import EmailMessage
 from quart import current_app
 import asyncio
+
+# RAILWAY SMTP SETUP GUIDE:
+#
+# Railway blocks traditional SMTP. Use MailerSend API instead:
+#
+# Set this environment variable in Railway:
+# MAILERSEND_TOKEN=your_mailersend_api_token_here
+#
+# Get your token from: https://app.mailersend.com/api-tokens
+#
+# The app will automatically use MailerSend API if MAILERSEND_TOKEN is set,
+# otherwise falls back to SMTP (for development).
 
 class EmailService:
     def __init__(self):
@@ -11,6 +23,7 @@ class EmailService:
     def _get_config(self):
         """Get email configuration from current app context"""
         return {
+            'mailersend_token': current_app.config.get('MAILERSEND_TOKEN', ''),
             'smtp_server': current_app.config['SMTP_SERVER'],
             'smtp_port': current_app.config['SMTP_PORT'],
             'smtp_username': current_app.config['SMTP_USERNAME'],
@@ -20,37 +33,135 @@ class EmailService:
         }
 
     async def send_email(self, to_email: str, subject: str, body: str):
-        """Send an email asynchronously"""
-        # try:
-        config = self._get_config()
+        """Send an email asynchronously using MailerSend API or SMTP fallback"""
+        try:
+            config = self._get_config()
 
-        # Create message
-        msg = EmailMessage()
-        msg['From'] = f"{config['email_from_name']} <{config['email_from']}>"
-        msg['To'] = to_email
-        msg['Subject'] = subject
-        msg.set_content(body)
+            # Try MailerSend API first if token is available
+            if config['mailersend_token']:
+                try:
+                    return await self._send_via_mailersend(config, to_email, subject, body)
+                except Exception as e:
+                    print(f"MailerSend API failed, falling back to SMTP: {str(e)}")
+                    # Fall back to SMTP if MailerSend fails
 
-        # Send email
-        async with aiosmtplib.SMTP(
-            hostname=config['smtp_server'],
-            port=config['smtp_port'],
-            use_tls=True
-        ) as smtp:
-            await smtp.starttls()
-            if config['smtp_username'] and config['smtp_password']:
-                await smtp.login(config['smtp_username'], config['smtp_password'])
-            await smtp.send_message(msg)
+            # Fall back to SMTP or skip if not configured
+            if not config['smtp_server'] or config['smtp_server'] == 'smtp.gmail.com':
+                print(f"Email sending skipped (SMTP not configured or using Gmail): {to_email}")
+                return
 
-        print(f"Email sent successfully to {to_email}")
-        # except Exception as e:
-        #     print(f"Failed to send email to {to_email}: {str(e)}")
-        #     # In production, you might want to log this or use a queue system
+            # Use SMTP as fallback
+            return await self._send_via_smtp(config, to_email, subject, body)
+
+        except Exception as e:
+            print(f"Failed to send email to {to_email}: {str(e)}")
+            # Don't raise exception - email failure shouldn't break the app
+
+    async def _send_via_mailersend(self, config, to_email: str, subject: str, body: str):
+        """Send email using MailerSend API"""
+        url = "https://api.mailersend.com/v1/email"
+
+        payload = {
+            "from": {
+                "email": config['email_from'],
+                "name": config['email_from_name']
+            },
+            "to": [{
+                "email": to_email
+            }],
+            "subject": subject,
+            "text": body,
+            "html": f"<pre>{body}</pre>"  # Convert plain text to simple HTML
+        }
+
+        headers = {
+            "Authorization": f"Bearer {config['mailersend_token']}",
+            "Content-Type": "application/json"
+        }
+
+        timeout = 30  # 30 second timeout
+        try:
+            async with asyncio.timeout(timeout):
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        if response.status == 202:
+                            print(f"Email sent successfully via MailerSend to {to_email}")
+                            return True
+                        elif response.status == 422:
+                            error_data = await response.json()
+                            print(f"MailerSend validation error for {to_email}: {error_data}")
+                            raise Exception(f"Validation error: {error_data}")
+                        else:
+                            error_text = await response.text()
+                            print(f"MailerSend API error for {to_email} (status {response.status}): {error_text}")
+                            raise Exception(f"API error: {error_text}")
+
+        except asyncio.TimeoutError:
+            print(f"MailerSend API timed out for {to_email}")
+            raise Exception("Timeout")
+        except Exception as e:
+            print(f"MailerSend API failed for {to_email}: {str(e)}")
+            raise
+
+    async def _send_via_smtp(self, config, to_email: str, subject: str, body: str):
+        """Send email using SMTP as fallback"""
+        try:
+            # Handle different SMTP providers
+            use_tls = True
+            starttls_needed = False
+
+            # SendGrid SMTP settings (Railway-compatible)
+            if 'smtp.sendgrid.net' in config['smtp_server']:
+                use_tls = True
+                starttls_needed = False
+            # Mailgun SMTP settings
+            elif 'smtp.mailgun.org' in config['smtp_server']:
+                use_tls = True
+                starttls_needed = False
+            # Amazon SES
+            elif 'email-smtp' in config['smtp_server']:
+                use_tls = True
+                starttls_needed = False
+
+            # Create message
+            msg = EmailMessage()
+            msg['From'] = f"{config['email_from_name']} <{config['email_from']}>"
+            msg['To'] = to_email
+            msg['Subject'] = subject
+            msg.set_content(body)
+
+            # Send email with timeout
+            timeout = 30  # 30 second timeout for email sending
+            try:
+                async with asyncio.timeout(timeout):
+                    async with aiosmtplib.SMTP(
+                        hostname=config['smtp_server'],
+                        port=config['smtp_port'],
+                        use_tls=use_tls,
+                        timeout=10  # Connection timeout
+                    ) as smtp:
+                        if starttls_needed:
+                            await smtp.starttls()
+                        if config['smtp_username'] and config['smtp_password']:
+                            await smtp.login(config['smtp_username'], config['smtp_password'])
+                        await smtp.send_message(msg)
+
+                print(f"Email sent successfully via SMTP to {to_email}")
+
+            except asyncio.TimeoutError:
+                print(f"SMTP sending timed out for {to_email}")
+            except aiosmtplib.SMTPException as e:
+                print(f"SMTP error sending email to {to_email}: {str(e)}")
+            except Exception as e:
+                print(f"Unexpected SMTP error sending email to {to_email}: {str(e)}")
+
+        except Exception as e:
+            print(f"SMTP fallback failed for {to_email}: {str(e)}")
+            raise
 
     async def send_welcome_email(self, email: str, name: str = None):
         """Send welcome email after signup"""
         subject = "Welcome to Astrid Global Ltd Trading Platform!"
-
         if name:
             greeting = f"Hello {name},"
         else:

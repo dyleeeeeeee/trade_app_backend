@@ -30,10 +30,17 @@ class QuartConfig:
     SESSION_COOKIE_SAMESITE = 'Lax'  # Use 'None' in production with HTTPS
     SESSION_COOKIE_DOMAIN = None  # Allow any domain
 
-    # Email settings
-    SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
+    # Email settings (MailerSend API preferred, Railway-compatible)
+    # For Railway deployment, use MailerSend API token:
+    # MAILERSEND_TOKEN=your_mailersend_api_token_here
+    #
+    # Get token from: https://app.mailersend.com/api-tokens
+    #
+    # SMTP fallback for development:
+    MAILERSEND_TOKEN = os.getenv('MAILERSEND_TOKEN', '')
+    SMTP_SERVER = os.getenv('SMTP_SERVER', '')  # Empty for development (skips emails)
     SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
     SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
     SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
-    EMAIL_FROM = os.getenv('EMAIL_FROM', 'noreply@cookiecash.com')
-    EMAIL_FROM_NAME = os.getenv('EMAIL_FROM_NAME', 'Cookie Cash Trading')
+    EMAIL_FROM = os.getenv('EMAIL_FROM', 'noreply@astridglobal.com')
+    EMAIL_FROM_NAME = os.getenv('EMAIL_FROM_NAME', 'Astrid Global Ltd')

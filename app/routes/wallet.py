@@ -101,7 +101,9 @@ async def withdraw():
 
             # Send withdrawal request email (don't await to avoid blocking)
             import asyncio
-            asyncio.create_task(email_service.send_withdrawal_request_email(g.user['email'], float(amount), withdrawal['id']))
+            user_email_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+            user_email = user_email_row['email'] if user_email_row else None
+            asyncio.create_task(email_service.send_withdrawal_request_email(user_email, float(amount), withdrawal['id']))
 
             return jsonify({
                 'message': 'Withdrawal request submitted',

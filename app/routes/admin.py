@@ -1,11 +1,9 @@
 from quart import Blueprint, request, jsonify, current_app, g
-from ..middleware import admin_required
 from ..utils.email import email_service
 
 admin_bp = Blueprint('admin', __name__)
 
 @admin_bp.route('/admin/users', methods=['GET'])
-@admin_required
 async def get_users():
     async with current_app.db_pool.acquire() as conn:
         users = await conn.fetch('''
@@ -24,7 +22,6 @@ async def get_users():
         return jsonify({'users': user_list}), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/block', methods=['POST'])
-@admin_required
 async def block_user(user_id):
     data = await request.get_json()
     block = data.get('block', False)
@@ -39,7 +36,6 @@ async def block_user(user_id):
         return jsonify({'message': f'User {"blocked" if block else "unblocked"} successfully'}), 200
 
 @admin_bp.route('/admin/withdrawals', methods=['GET'])
-@admin_required
 async def get_withdrawals():
     async with current_app.db_pool.acquire() as conn:
         withdrawals = await conn.fetch('''
@@ -60,7 +56,6 @@ async def get_withdrawals():
         return jsonify({'withdrawals': withdrawal_list}), 200
 
 @admin_bp.route('/admin/withdrawals/<int:withdrawal_id>/approve', methods=['POST'])
-@admin_required
 async def approve_withdrawal(withdrawal_id):
     async with current_app.db_pool.acquire() as conn:
         async with conn.transaction():
@@ -100,7 +95,6 @@ async def approve_withdrawal(withdrawal_id):
             return jsonify({'message': 'Withdrawal approved successfully'}), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/balance', methods=['POST'])
-@admin_required
 async def update_user_balance(user_id):
     data = await request.get_json()
     new_balance = data.get('balance', 0)
@@ -150,7 +144,6 @@ async def update_user_balance(user_id):
             }), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/balance-info', methods=['GET'])
-@admin_required
 async def get_user_balance(user_id):
     async with current_app.db_pool.acquire() as conn:
         # Get the most recent balance_after
@@ -167,7 +160,6 @@ async def get_user_balance(user_id):
         return jsonify({'balance': balance}), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/profit', methods=['POST'])
-@admin_required
 async def update_user_profit(user_id):
     data = await request.get_json()
     new_profit = data.get('profit', 0)
@@ -231,7 +223,6 @@ async def update_user_profit(user_id):
             }), 200
 
 @admin_bp.route('/admin/users/<int:user_id>/profit-info', methods=['GET'])
-@admin_required
 async def get_user_profit(user_id):
     async with current_app.db_pool.acquire() as conn:
         # Get the most recent profit_after

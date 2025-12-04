@@ -74,9 +74,14 @@ async def deposit():
 async def withdraw():
     data = await request.get_json()
     amount = data.get('amount', 0)
+    network = data.get('network')
+    wallet_address = data.get('wallet_address')
 
     if amount <= 0:
         return jsonify({'message': 'Invalid amount'}), 400
+    
+    if not network or not wallet_address:
+        return jsonify({'message': 'Network and wallet address are required'}), 400
 
     user_id = g.user_id
 
@@ -98,16 +103,22 @@ async def withdraw():
 
             # Create withdrawal request
             withdrawal = await conn.fetchrow('''
-                INSERT INTO withdrawals (user_id, amount)
-                VALUES ($1, $2)
-                RETURNING id, amount, status, requested_at
-            ''', user_id, amount)
+                INSERT INTO withdrawals (user_id, amount, network, wallet_address)
+                VALUES ($1, $2, $3, $4)
+                RETURNING id, amount, status, requested_at, network, wallet_address
+            ''', user_id, amount, network, wallet_address)
 
             # Send withdrawal request email (don't await to avoid blocking)
             import asyncio
             user_email_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
             user_email = user_email_row['email'] if user_email_row else None
-            asyncio.create_task(email_service.send_withdrawal_request_email(user_email, float(amount), withdrawal['id']))
+            asyncio.create_task(email_service.send_withdrawal_request_email(
+                user_email, 
+                float(amount), 
+                withdrawal['id'],
+                network,
+                wallet_address
+            ))
 
             return jsonify({
                 'message': 'Withdrawal request submitted',
@@ -115,6 +126,8 @@ async def withdraw():
                     'id': withdrawal['id'],
                     'amount': float(withdrawal['amount']),
                     'status': withdrawal['status'],
+                    'network': withdrawal['network'],
+                    'wallet_address': withdrawal['wallet_address'],
                     'requested_at': withdrawal['requested_at'].isoformat()
                 }
             }), 200
@@ -187,7 +200,7 @@ async def get_withdrawals():
 
     async with current_app.db_pool.acquire() as conn:
         withdrawals = await conn.fetch('''
-            SELECT id, amount, status, requested_at
+            SELECT id, amount, status, requested_at, network, wallet_address
             FROM withdrawals
             WHERE user_id = $1
             ORDER BY requested_at DESC
@@ -197,6 +210,8 @@ async def get_withdrawals():
             'id': w['id'],
             'amount': float(w['amount']),
             'status': w['status'],
+            'network': w['network'],
+            'wallet_address': w['wallet_address'],
             'created_at': w['requested_at'].isoformat()
         } for w in withdrawals]
 

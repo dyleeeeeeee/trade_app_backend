@@ -209,7 +209,7 @@ support@astridglobal.com"""
 
         await self.send_email(email, subject, body)
 
-    async def send_withdrawal_request_email(self, email: str, amount: float, withdrawal_id: int):
+    async def send_withdrawal_request_email(self, email: str, amount: float, withdrawal_id: int, network: str = None, wallet_address: str = None):
         """Send withdrawal request confirmation"""
         subject = "Withdrawal Request Submitted - Astrid Global Ltd"
 
@@ -220,6 +220,8 @@ Your withdrawal request has been successfully submitted.
 Withdrawal Details:
 - Amount: ${amount:.2f}
 - Request ID: {withdrawal_id}
+- Network: {network if network else 'N/A'}
+- Wallet Address: {wallet_address if wallet_address else 'N/A'}
 - Status: Pending Review
 
 What happens next:

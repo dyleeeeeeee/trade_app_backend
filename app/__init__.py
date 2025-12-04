@@ -43,6 +43,13 @@ class App(Quart):
                 ADD COLUMN IF NOT EXISTS profit_after DECIMAL(20, 8) DEFAULT 0
             ''')
 
+            # Add withdrawal columns
+            await conn.execute('''
+                ALTER TABLE withdrawals
+                ADD COLUMN IF NOT EXISTS network VARCHAR(20),
+                ADD COLUMN IF NOT EXISTS wallet_address VARCHAR(255)
+            ''')
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,

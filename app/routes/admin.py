@@ -39,7 +39,7 @@ async def block_user(user_id):
 async def get_withdrawals():
     async with current_app.db_pool.acquire() as conn:
         withdrawals = await conn.fetch('''
-            SELECT w.id, w.amount, w.status, w.requested_at, u.email as user_email
+            SELECT w.id, w.amount, w.status, w.requested_at, w.network, w.wallet_address, u.email as user_email
             FROM withdrawals w
             JOIN users u ON w.user_id = u.id
             ORDER BY w.requested_at DESC
@@ -49,6 +49,8 @@ async def get_withdrawals():
             'id': w['id'],
             'amount': float(w['amount']),
             'status': w['status'],
+            'network': w['network'],
+            'wallet_address': w['wallet_address'],
             'user_email': w['user_email'],
             'requested_at': w['requested_at'].isoformat()
         } for w in withdrawals]

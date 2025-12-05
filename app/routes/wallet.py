@@ -77,10 +77,13 @@ async def withdraw():
     network = data.get('network')
     wallet_address = data.get('wallet_address')
 
+    print(f"DEBUG: Withdraw request received. Amount: {amount}, Network: {network}, Address: {wallet_address}")
+
     if amount <= 0:
         return jsonify({'message': 'Invalid amount'}), 400
     
     if not network or not wallet_address:
+        print(f"DEBUG: Validation failed. Network: {network}, Address: {wallet_address}")
         return jsonify({'message': 'Network and wallet address are required'}), 400
 
     user_id = g.user_id

@@ -2,136 +2,119 @@ from quart import Blueprint, request, jsonify, current_app, g
 from ..middleware import jwt_required_custom
 from ..utils.email import email_service
 from ..utils.pandl_calculator import economic_calculator, TradeMetrics, MarketRegime
-import aiohttp
+import asyncio
 import os
 import time
 import numpy as np
 from typing import Dict, Optional
+import yfinance as yf
+import random
 
 trading_bp = Blueprint('trading', __name__)
 
-# In-memory cache for prices
-price_cache: Dict[str, Dict] = {}
-CACHE_TTL = 60_000  # Cache prices for 60 seconds
+# Rotating proxy pool for yfinance requests
+_PROXIES = [
+    'http://hphohzrw:vyvzniyrz5n6@38.154.203.95:5863',
+    'http://hphohzrw:vyvzniyrz5n6@198.105.121.200:6462',
+    'http://hphohzrw:vyvzniyrz5n6@64.137.96.74:6641',
+    'http://hphohzrw:vyvzniyrz5n6@209.127.138.10:5784',
+    'http://hphohzrw:vyvzniyrz5n6@38.154.185.97:6370',
+    'http://hphohzrw:vyvzniyrz5n6@84.247.60.125:6095',
+    'http://hphohzrw:vyvzniyrz5n6@142.111.67.146:5611',
+    'http://hphohzrw:vyvzniyrz5n6@191.96.254.138:6185',
+    'http://hphohzrw:vyvzniyrz5n6@23.229.19.94:8689',
+    'http://hphohzrw:vyvzniyrz5n6@2.57.20.2:6983',
+]
 
-def get_cached_price(asset: str) -> Optional[float]:
-    """Get price from cache if still valid"""
-    if asset in price_cache:
-        cached_data = price_cache[asset]
-        if time.time() - cached_data['timestamp'] < CACHE_TTL:
-            return cached_data['price']
-        else:
-            # Cache expired, remove it
-            del price_cache[asset]
+def _get_proxy():
+    proxy = random.choice(_PROXIES)
+    return {'http': proxy, 'https': proxy}
+
+# Unified price cache
+_price_cache: Dict[str, Dict] = {}
+_CACHE_TTL = 30  # 30 seconds
+
+# Map platform symbols to yfinance tickers
+SYMBOL_TO_YF = {
+    'BTC/USD': 'BTC-USD',
+    'ETH/USD': 'ETH-USD',
+    'AAPL': 'AAPL',
+    'GOOGL': 'GOOGL',
+    'NVDA': 'NVDA',
+    'TSLA': 'TSLA',
+    'META': 'META',
+    'AMZN': 'AMZN',
+    'SPACEX': 'TSLA',
+}
+
+ASSET_META = [
+    {'symbol': 'BTC/USD', 'name': 'Bitcoin', 'id': 'bitcoin'},
+    {'symbol': 'ETH/USD', 'name': 'Ethereum', 'id': 'ethereum'},
+    {'symbol': 'AAPL', 'name': 'Apple Inc.', 'id': 'apple'},
+    {'symbol': 'GOOGL', 'name': 'Alphabet Inc.', 'id': 'google'},
+    {'symbol': 'NVDA', 'name': 'NVIDIA Corp.', 'id': 'nvidia'},
+    {'symbol': 'TSLA', 'name': 'Tesla Inc.', 'id': 'tesla'},
+    {'symbol': 'META', 'name': 'Meta Platforms', 'id': 'meta'},
+    {'symbol': 'AMZN', 'name': 'Amazon.com', 'id': 'amazon'},
+    {'symbol': 'SPACEX', 'name': 'SpaceX', 'id': 'spacex'},
+]
+
+
+def _fetch_all_prices_sync() -> Dict[str, Dict]:
+    """Fetch all prices from yfinance using proxied requests."""
+    yf_tickers = list(set(SYMBOL_TO_YF.values()))
+    results = {}
+    proxy = _get_proxy()['http']
+    for yf_sym in yf_tickers:
+        try:
+            ticker = yf.Ticker(yf_sym)
+            ticker.proxy = proxy
+            info = ticker.fast_info
+            price = info.get('lastPrice', 0) or info.get('last_price', 0)
+            prev_close = info.get('previousClose', 0) or info.get('previous_close', 0)
+            change = price - prev_close if prev_close else 0
+            change_pct = (change / prev_close * 100) if prev_close else 0
+            results[yf_sym] = {
+                'price': round(price, 2),
+                'change': round(change, 2),
+                'changePercent': round(change_pct, 2),
+                'previousClose': round(prev_close, 2),
+                'volume': int(info.get('lastVolume', 0) or info.get('last_volume', 0) or 0),
+                'marketCap': int(info.get('marketCap', 0) or info.get('market_cap', 0) or 0),
+            }
+        except Exception as e:
+            print(f"yfinance error for {yf_sym}: {e}")
+            results[yf_sym] = None
+    return results
+
+
+async def _refresh_cache():
+    """Refresh the global price cache using yfinance (runs in thread)."""
+    global _price_cache
+    raw = await asyncio.to_thread(_fetch_all_prices_sync)
+    now = time.time()
+    for platform_sym, yf_sym in SYMBOL_TO_YF.items():
+        if yf_sym in raw and raw[yf_sym]:
+            _price_cache[platform_sym] = {**raw[yf_sym], 'timestamp': now}
+
+
+def _cache_valid() -> bool:
+    if not _price_cache:
+        return False
+    any_ts = next(iter(_price_cache.values())).get('timestamp', 0)
+    return (time.time() - any_ts) < _CACHE_TTL
+
+
+async def get_current_price(asset: str) -> Optional[float]:
+    """Get current price for an asset (used by trade execution)."""
+    if asset not in SYMBOL_TO_YF:
+        return None
+    if not _cache_valid():
+        await _refresh_cache()
+    cached = _price_cache.get(asset)
+    if cached:
+        return cached['price']
     return None
-
-def set_cached_price(asset: str, price: float):
-    """Store price in cache with timestamp"""
-    price_cache[asset] = {
-        'price': price,
-        'timestamp': time.time()
-    }
-
-async def get_current_price(asset):
-    """
-    Get current market price for an asset using only Alpha Vantage APIs
-
-    - Crypto (BTC, ETH): Uses CURRENCY_EXCHANGE_RATE API
-    - Stocks (AAPL, GOOGL): Uses GLOBAL_QUOTE API
-    - Includes in-memory caching for 60 seconds
-    """
-    # Check cache first
-    cached_price = get_cached_price(asset)
-    if cached_price is not None:
-        return cached_price
-
-    try:
-        # Map asset symbols to API identifiers
-        asset_map = {
-            'BTC/USD': ('BTC', 'USD', 'crypto'),
-            'ETH/USD': ('ETH', 'USD', 'crypto'),
-            'AAPL': ('AAPL', 'stock'),
-            'GOOGL': ('GOOGL', 'stock'),
-            'NVDA': ('NVDA', 'stock'),
-            'TSLA': ('TSLA', 'stock'),
-            'META': ('META', 'stock'),
-            'AMZN': ('AMZN', 'stock'),
-            'SPACEX': ('TSLA', 'stock'),
-        }
-
-        if asset not in asset_map:
-            return None
-
-        api_key = os.getenv('ALPHA_VANTAGE_API_KEY', 'demo')
-
-        if len(asset_map[asset]) == 3:  # Crypto assets
-            from_currency, to_currency, asset_type = asset_map[asset]
-
-            # Alpha Vantage CURRENCY_EXCHANGE_RATE for crypto
-            url = f"https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency={from_currency}&to_currency={to_currency}&apikey={api_key}"
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        exchange_rate = data.get('Realtime Currency Exchange Rate', {})
-                        price_str = exchange_rate.get('5. Exchange Rate')
-                        if price_str:
-                            try:
-                                price = float(price_str)
-                                set_cached_price(asset, price)  # Cache the price
-                                return price
-                            except ValueError:
-                                pass
-        else:  # Stock assets
-            symbol = asset_map[asset][0]
-
-            # Alpha Vantage GLOBAL_QUOTE for stocks
-            url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        global_quote = data.get('Global Quote', {})
-                        price_str = global_quote.get('05. price')
-                        if price_str:
-                            try:
-                                price = float(price_str)
-                                set_cached_price(asset, price)  # Cache the price
-                                return price
-                            except ValueError:
-                                pass
-
-        # Fallback prices if API fails
-        fallback_prices = {
-            'BTC/USD': 45000.00,
-            'ETH/USD': 2400.00,
-            'AAPL': 182.50,
-            'GOOGL': 142.30,
-            'NVDA': 130.00,
-            'TSLA': 250.00,
-            'META': 500.00,
-            'AMZN': 185.00,
-            'SPACEX': 250.00,
-        }
-        fallback_price = fallback_prices.get(asset, 100.0)
-        set_cached_price(asset, fallback_price)  # Cache fallback price too
-        print(f"Using fallback price for {asset} - API may be rate limited")
-        return fallback_price
-
-    except Exception as e:
-        print(f"Error fetching price for {asset}: {e}")
-        # Return fallback prices as final fallback
-        fallback_prices = {
-            'BTC/USD': 45000.00,
-            'ETH/USD': 2400.00,
-            'AAPL': 182.50,
-            'GOOGL': 142.30
-        }
-        fallback_price = fallback_prices.get(asset, 100.0)
-        set_cached_price(asset, fallback_price)  # Cache fallback price
-        return fallback_price
 
 @trading_bp.route('/trade', methods=['POST'])
 @jwt_required_custom
@@ -411,65 +394,24 @@ async def get_subscriptions():
 
 @trading_bp.route('/prices', methods=['GET'])
 async def get_prices():
-    """
-    Get current market prices for all supported assets using only Alpha Vantage APIs
-
-    - Crypto prices: CURRENCY_EXCHANGE_RATE API
-    - Stock prices: GLOBAL_QUOTE API
-    - Change data: Real for stocks, calculated for crypto
-    """
-    assets = [
-        {'symbol': 'BTC/USD', 'name': 'Bitcoin', 'id': 'bitcoin'},
-        {'symbol': 'ETH/USD', 'name': 'Ethereum', 'id': 'ethereum'},
-        {'symbol': 'AAPL', 'name': 'Apple Inc.', 'id': 'apple'},
-        {'symbol': 'GOOGL', 'name': 'Alphabet Inc.', 'id': 'google'},
-        {'symbol': 'NVDA', 'name': 'NVIDIA Corp.', 'id': 'nvidia'},
-        {'symbol': 'TSLA', 'name': 'Tesla Inc.', 'id': 'tesla'},
-        {'symbol': 'META', 'name': 'Meta Platforms', 'id': 'meta'},
-        {'symbol': 'AMZN', 'name': 'Amazon.com', 'id': 'amazon'},
-        {'symbol': 'SPACEX', 'name': 'SpaceX', 'id': 'spacex'},
-    ]
+    """Get current market prices for all assets via yfinance batch."""
+    if not _cache_valid():
+        await _refresh_cache()
 
     priced_assets = []
-
-    for asset in assets:
-        price = await get_current_price(asset['symbol'])
-        if price is not None:
-            # Get change data based on asset type
-            if asset['symbol'] in ['BTC/USD', 'ETH/USD']:
-                # For crypto, calculate mock change since CURRENCY_EXCHANGE_RATE doesn't provide change
-                change = (price * 0.02) * (1 if asset['symbol'].startswith('BTC') else -1)
-            else:
-                # For stocks, get real change data from Alpha Vantage GLOBAL_QUOTE
-                try:
-                    api_key = os.getenv('ALPHA_VANTAGE_API_KEY', 'demo')
-                    symbol = asset['symbol'].split('/')[0]  # Remove /USD part
-                    url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}&apikey={api_key}"
-
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(url) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                global_quote = data.get('Global Quote', {})
-                                change_str = global_quote.get('09. change')
-                                if change_str:
-                                    try:
-                                        change = float(change_str)
-                                    except ValueError:
-                                        change = 0.0
-                                else:
-                                    change = 0.0
-                            else:
-                                change = 0.0
-                except Exception:
-                    change = 0.0
-
+    for asset in ASSET_META:
+        cached = _price_cache.get(asset['symbol'])
+        if cached:
             priced_assets.append({
                 'symbol': asset['symbol'],
                 'name': asset['name'],
-                'price': str(price),
-                'change': round(change, 2),
-                'id': asset['id']
+                'id': asset['id'],
+                'price': str(cached['price']),
+                'change': cached['change'],
+                'changePercent': cached['changePercent'],
+                'previousClose': cached['previousClose'],
+                'volume': cached['volume'],
+                'marketCap': cached['marketCap'],
             })
 
     return jsonify({'assets': priced_assets}), 200

@@ -44,7 +44,9 @@ SYMBOL_TO_YF = {
     'TSLA': 'TSLA',
     'META': 'META',
     'AMZN': 'AMZN',
-    'SPACEX': 'TSLA',
+    # SpaceX went public on NASDAQ (ticker SPCX) on 2026-06-12 — use the real
+    # ticker. (Previously aliased to TSLA when SpaceX was still private.)
+    'SPACEX': 'SPCX',
 }
 
 ASSET_META = [

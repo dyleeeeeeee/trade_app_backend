@@ -1,391 +1,290 @@
-import aiosmtplib
-from email.message import EmailMessage
+import resend
+import os
 from quart import current_app
-import asyncio
-from mailersend import MailerSendClient, EmailBuilder
+from pathlib import Path
 
-# RAILWAY SMTP SETUP GUIDE:
-#
-# Railway blocks traditional SMTP. Use MailerSend API instead:
-#
-# Set this environment variable in Railway:
-# MAILERSEND_TOKEN=your_mailersend_api_token_here
-#
-# Get your token from: https://app.mailersend.com/api-tokens
-#
-# The app will automatically use MailerSend API if MAILERSEND_TOKEN is set,
-# otherwise falls back to SMTP (for development).
+TEMPLATES_DIR = Path(__file__).parent.parent.parent / "emails"
+
+
+def _base_template(title: str, tagline_color: str, tagline_text: str, body_html: str) -> str:
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:0;">
+<div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+  <div style="text-align:center;padding:32px 0;">
+    <h1 style="color:#60a5fa;font-size:28px;font-weight:700;letter-spacing:4px;margin:0;">ASTRID GLOBAL</h1>
+    <p style="color:{tagline_color};font-size:12px;letter-spacing:2px;text-transform:uppercase;margin:4px 0 0;">{tagline_text}</p>
+  </div>
+  <div style="background-color:#1e293b;border-radius:12px;padding:40px 32px;border:1px solid #334155;">
+    <h2 style="color:#f1f5f9;font-size:24px;font-weight:600;margin:0 0 12px;">{title}</h2>
+    {body_html}
+  </div>
+  <div style="text-align:center;padding:24px 0;">
+    <p style="color:#64748b;font-size:12px;margin:0;">Astrid Global Ltd | Professional Trading Platform</p>
+    <p style="color:#60a5fa;font-size:12px;margin:4px 0 0;">support@astridgloballtd.pro</p>
+  </div>
+</div>
+</body>
+</html>"""
+
 
 class EmailService:
     def __init__(self):
-        # Don't access current_app here - it will be done when needed
         pass
 
-    def _get_config(self):
-        """Get email configuration from current app context"""
-        return {
-            'mailersend_token': current_app.config.get('MAILERSEND_TOKEN', ''),
-            'smtp_server': current_app.config['SMTP_SERVER'],
-            'smtp_port': current_app.config['SMTP_PORT'],
-            'smtp_username': current_app.config['SMTP_USERNAME'],
-            'smtp_password': current_app.config['SMTP_PASSWORD'],
-            'email_from': current_app.config['EMAIL_FROM'],
-            'email_from_name': current_app.config['EMAIL_FROM_NAME']
-        }
+    def _configure(self):
+        api_key = current_app.config.get('RESEND_API_KEY', os.getenv('RESEND_API_KEY', ''))
+        if api_key:
+            resend.api_key = api_key
+            return True
+        return False
 
-    async def send_email(self, to_email: str, subject: str, body: str):
-        """Send an email asynchronously using MailerSend API or SMTP fallback"""
+    def _get_from(self):
+        email_from = current_app.config.get('EMAIL_FROM', 'notifications@astridgloballtd.pro')
+        email_from_name = current_app.config.get('EMAIL_FROM_NAME', 'Astrid Global Ltd')
+        return f"{email_from_name} <{email_from}>"
+
+    async def send_email(self, to_email: str, subject: str, html: str):
         try:
-            config = self._get_config()
-
-            # Try MailerSend API first if token is available
-            if config['mailersend_token']:
-                try:
-                    return await self._send_via_mailersend(config, to_email, subject, body)
-                except Exception as e:
-                    print(f"MailerSend API failed, falling back to SMTP: {str(e)}")
-                    # Fall back to SMTP if MailerSend fails
-
-            # Fall back to SMTP or skip if not configured
-            if not config['smtp_server'] or config['smtp_server'] == 'smtp.gmail.com':
-                print(f"Email sending skipped (SMTP not configured or using Gmail): {to_email}")
+            if not self._configure():
+                print(f"Email skipped (no RESEND_API_KEY): {to_email} - {subject}")
                 return
 
-            # Use SMTP as fallback
-            return await self._send_via_smtp(config, to_email, subject, body)
+            params = {
+                "from": self._get_from(),
+                "to": [to_email],
+                "subject": subject,
+                "html": html,
+            }
+
+            import asyncio
+            response = await asyncio.to_thread(resend.Emails.send, params)
+            print(f"Email sent via Resend to {to_email}: {response.get('id', 'ok')}")
+            return True
 
         except Exception as e:
             print(f"Failed to send email to {to_email}: {str(e)}")
-            # Don't raise exception - email failure shouldn't break the app
-
-    async def _send_via_mailersend(self, config, to_email: str, subject: str, body: str):
-        """Send email using MailerSend SDK"""
-        try:
-            # Initialize MailerSend client
-            ms = MailerSendClient(api_key=config['mailersend_token'])
-
-            # Build email using the official SDK
-            email = (EmailBuilder()
-                     .from_email(config['email_from'], config['email_from_name'])
-                     .to_many([{"email": to_email}])
-                     .subject(subject)
-                     .html(f"<div style='font-family: Arial, sans-serif; white-space: pre-line;'>{body}</div>")
-                     .text(body)
-                     .build())
-
-            # Send email using asyncio.to_thread since SDK is synchronous
-            response = await asyncio.to_thread(ms.emails.send, email)
-
-            # Check response
-            if response.success:
-                # Extract message ID if available
-                message_id = getattr(response, 'headers', {}).get('x-message-id', 'unknown')
-                print(f"Email sent successfully via MailerSend SDK to {to_email} (ID: {message_id})")
-                return True
-            else:
-                error_msg = getattr(response, 'data', {}).get('message', 'Unknown error')
-                status_code = getattr(response, 'status_code', 'unknown')
-                print(f"MailerSend SDK error for {to_email} (status {status_code}): {error_msg}")
-                raise Exception(f"API error ({status_code}): {error_msg}")
-
-        except Exception as e:
-            print(f"MailerSend SDK failed for {to_email}: {str(e)}")
-            raise
-
-    async def _send_via_smtp(self, config, to_email: str, subject: str, body: str):
-        """Send email using SMTP as fallback"""
-        try:
-            # Handle different SMTP providers
-            use_tls = True
-            starttls_needed = False
-
-            # SendGrid SMTP settings (Railway-compatible)
-            if 'smtp.sendgrid.net' in config['smtp_server']:
-                use_tls = True
-                starttls_needed = False
-            # Mailgun SMTP settings
-            elif 'smtp.mailgun.org' in config['smtp_server']:
-                use_tls = True
-                starttls_needed = False
-            # Amazon SES
-            elif 'email-smtp' in config['smtp_server']:
-                use_tls = True
-                starttls_needed = False
-
-            # Create message
-            msg = EmailMessage()
-            msg['From'] = f"{config['email_from_name']} <{config['email_from']}>"
-            msg['To'] = to_email
-            msg['Subject'] = subject
-            msg.set_content(body)
-
-            # Send email with timeout
-            timeout = 30  # 30 second timeout for email sending
-            try:
-                async with asyncio.timeout(timeout):
-                    async with aiosmtplib.SMTP(
-                        hostname=config['smtp_server'],
-                        port=config['smtp_port'],
-                        use_tls=use_tls,
-                        timeout=10  # Connection timeout
-                    ) as smtp:
-                        if starttls_needed:
-                            await smtp.starttls()
-                        if config['smtp_username'] and config['smtp_password']:
-                            await smtp.login(config['smtp_username'], config['smtp_password'])
-                        await smtp.send_message(msg)
-
-                print(f"Email sent successfully via SMTP to {to_email}")
-
-            except asyncio.TimeoutError:
-                print(f"SMTP sending timed out for {to_email}")
-            except aiosmtplib.SMTPException as e:
-                print(f"SMTP error sending email to {to_email}: {str(e)}")
-            except Exception as e:
-                print(f"Unexpected SMTP error sending email to {to_email}: {str(e)}")
-
-        except Exception as e:
-            print(f"SMTP fallback failed for {to_email}: {str(e)}")
-            raise
 
     async def send_welcome_email(self, email: str, name: str = None):
-        """Send welcome email after signup"""
-        subject = "Welcome to Astrid Global Ltd Trading Platform!"
-        if name:
-            greeting = f"Hello {name},"
-        else:
-            greeting = "Hello,"
+        display_name = name or "Trader"
+        body = f"""
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      Welcome aboard, {display_name}! Your account has been successfully created.
+    </p>
+    <div style="background-color:#0f172a;border-radius:8px;padding:20px;margin:24px 0;">
+      <p style="color:#a5f3fc;font-size:14px;margin:8px 0;">&#x2713; Deposit funds &amp; start trading</p>
+      <p style="color:#a5f3fc;font-size:14px;margin:8px 0;">&#x2713; Buy/sell crypto &amp; stocks in real-time</p>
+      <p style="color:#a5f3fc;font-size:14px;margin:8px 0;">&#x2713; Subscribe to copy trading strategies</p>
+      <p style="color:#a5f3fc;font-size:14px;margin:8px 0;">&#x2713; Monitor your portfolio 24/7</p>
+    </div>
+    <div style="text-align:center;margin:32px 0 24px;">
+      <a href="https://astridgloballtd.pro/dashboard" style="background-color:#3b82f6;border-radius:8px;color:#ffffff;display:inline-block;font-size:15px;font-weight:600;padding:14px 32px;text-decoration:none;">Open Dashboard</a>
+    </div>
+    <hr style="border-color:#334155;margin:24px 0;">
+    <h3 style="color:#e2e8f0;font-size:16px;font-weight:600;margin:24px 0 8px;">Security Recommendations</h3>
+    <p style="color:#cbd5e1;font-size:14px;line-height:1.8;margin:0;">
+      &#x2022; Never share your login credentials<br>
+      &#x2022; Enable two-factor authentication<br>
+      &#x2022; Keep your account information up to date
+    </p>"""
 
-        body = f"""{greeting}
-
-Welcome to Astrid Global Ltd Trading Platform! Your account has been successfully created.
-
-You can now:
-- Deposit funds to start trading
-- Place buy/sell orders on various assets
-- Subscribe to copy trading strategies
-- Monitor your portfolio in real-time
-
-For security reasons, we recommend:
-- Never share your login credentials
-- Enable two-factor authentication when available
-- Keep your account information up to date
-
-If you have any questions, please don't hesitate to contact our support team.
-
-Happy trading!
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template(f"Welcome aboard, {display_name}!", "#94a3b8", "Trading Platform", body)
+        await self.send_email(email, "Welcome to Astrid Global Ltd Trading Platform!", html)
 
     async def send_login_notification(self, email: str, ip_address: str = "Unknown", user_agent: str = "Unknown"):
-        """Send login notification email"""
-        subject = "New Login to Your Astrid Global Ltd Account"
+        from datetime import datetime, timezone
+        login_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-        body = f"""Hello,
+        body = f"""
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      We detected a new sign-in to your account.
+    </p>
+    <div style="background-color:#0f172a;border-radius:8px;padding:20px;margin:20px 0;">
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:12px 0 2px;">Time</p>
+      <p style="color:#e2e8f0;font-size:14px;font-family:monospace;margin:0 0 8px;">{login_time}</p>
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:12px 0 2px;">IP Address</p>
+      <p style="color:#e2e8f0;font-size:14px;font-family:monospace;margin:0 0 8px;">{ip_address}</p>
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:12px 0 2px;">Device</p>
+      <p style="color:#e2e8f0;font-size:14px;font-family:monospace;margin:0;">{user_agent}</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;margin:0 0 16px;">If this was you, no action is needed.</p>
+    <div style="background-color:#7c2d1220;border:1px solid #dc262640;border-radius:8px;padding:16px;margin:20px 0 0;">
+      <p style="color:#fca5a5;font-size:13px;margin:0;line-height:1.5;">
+        If you don't recognize this activity, change your password immediately and contact support.
+      </p>
+    </div>"""
 
-We detected a new login to your Astrid Global Ltd Trading account.
-
-Login Details:
-- Time: {asyncio.get_event_loop().time()}  # This would be better with proper datetime
-- IP Address: {ip_address}
-- Device/Browser: {user_agent}
-
-If this was you, no action is needed.
-
-If you don't recognize this activity, please:
-1. Change your password immediately
-2. Contact our support team
-3. Review your account activity
-
-For your security, we recommend enabling additional security measures.
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template("New Login Detected", "#fbbf24", "Security Alert", body)
+        await self.send_email(email, "New Login to Your Astrid Global Account", html)
 
     async def send_withdrawal_request_email(self, email: str, amount: float, withdrawal_id: int, network: str = None, wallet_address: str = None):
-        """Send withdrawal request confirmation"""
-        subject = "Withdrawal Request Submitted - Astrid Global Ltd"
+        body = f"""
+    <div style="background-color:#92400e20;border:1px solid #f59e0b;border-radius:20px;padding:4px 16px;display:inline-block;margin-bottom:16px;">
+      <p style="color:#fbbf24;font-size:11px;font-weight:700;letter-spacing:1px;margin:0;">PENDING REVIEW</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:12px 0 20px;">
+      Your withdrawal request has been received and is pending review.
+    </p>
+    <div style="background-color:#0f172a;border-radius:10px;padding:24px;margin:0 0 20px;">
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 2px;">Amount</p>
+      <p style="color:#f1f5f9;font-size:24px;font-weight:700;margin:0 0 16px;">${amount:,.2f}</p>
+      <hr style="border-color:#334155;margin:16px 0;">
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 2px;">Request ID</p>
+      <p style="color:#e2e8f0;font-size:14px;margin:0 0 10px;">#{withdrawal_id}</p>
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 2px;">Network</p>
+      <p style="color:#e2e8f0;font-size:14px;margin:0 0 10px;">{network or 'N/A'}</p>
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 2px;">Wallet</p>
+      <p style="color:#e2e8f0;font-size:13px;font-family:monospace;margin:0;">{wallet_address or 'N/A'}</p>
+    </div>
+    <h3 style="color:#e2e8f0;font-size:16px;font-weight:600;margin:24px 0 12px;">What happens next</h3>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">1. Our team reviews your request (1-2 business days)</p>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">2. Funds are processed to your wallet</p>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">3. You'll receive a confirmation email</p>"""
 
-        body = f"""Hello,
-
-Your withdrawal request has been successfully submitted.
-
-Withdrawal Details:
-- Amount: ${amount:.2f}
-- Request ID: {withdrawal_id}
-- Network: {network if network else 'N/A'}
-- Wallet Address: {wallet_address if wallet_address else 'N/A'}
-- Status: Pending Review
-
-What happens next:
-1. Our team will review your withdrawal request (usually within 1-2 business days)
-2. Once approved, funds will be processed to your designated withdrawal method
-3. You will receive another email confirming the completion
-
-Please note:
-- All withdrawals are subject to security verification
-- Large amounts may require additional documentation
-- Processing times may vary depending on your location and withdrawal method
-
-If you have any questions about this withdrawal, please contact support with the request ID.
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template("Withdrawal Submitted", "#94a3b8", "Withdrawal Confirmation", body)
+        await self.send_email(email, f"Withdrawal Request Submitted - Astrid Global Ltd", html)
 
     async def send_withdrawal_approved_email(self, email: str, amount: float, withdrawal_id: int):
-        """Send withdrawal approval notification"""
-        subject = "Withdrawal Approved - Astrid Global Ltd"
+        body = f"""
+    <div style="background-color:#065f4620;border:1px solid #10b981;border-radius:20px;padding:4px 16px;display:inline-block;margin-bottom:16px;">
+      <p style="color:#34d399;font-size:11px;font-weight:700;letter-spacing:1px;margin:0;">&#x2713; APPROVED</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:12px 0 24px;">
+      Great news! Your withdrawal has been approved and funds are being sent.
+    </p>
+    <div style="background-color:#065f4615;border:1px solid #10b98140;border-radius:10px;padding:24px;text-align:center;margin:0 0 24px;">
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px;">Amount Sent</p>
+      <p style="color:#34d399;font-size:32px;font-weight:700;margin:0;">${amount:,.2f}</p>
+      <p style="color:#94a3b8;font-size:12px;margin:8px 0 0;">Request #{withdrawal_id}</p>
+    </div>
+    <h3 style="color:#e2e8f0;font-size:16px;font-weight:600;margin:24px 0 12px;">Processing Times</h3>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">Bank Transfer: 1-3 business days</p>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">Crypto Wallet: Usually instant to a few hours</p>
+    <hr style="border-color:#334155;margin:24px 0;">
+    <p style="color:#94a3b8;font-size:13px;margin:0;line-height:1.5;">
+      If you don't receive funds within the expected timeframe, contact support with your request ID.
+    </p>"""
 
-        body = f"""Hello,
-
-Great news! Your withdrawal request has been approved and processed.
-
-Withdrawal Details:
-- Amount: ${amount:.2f}
-- Request ID: {withdrawal_id}
-- Status: Completed
-
-The funds have been sent to your designated withdrawal method. Processing times vary by method:
-- Bank Transfer: 1-3 business days
-- Crypto Wallet: Usually instant to a few hours
-- Other methods: Check the processing time for your specific method
-
-Please check your account/balance to confirm receipt of funds.
-
-If you don't receive the funds within the expected timeframe, please contact support with the withdrawal ID.
-
-Thank you for using Astrid Global Ltd!
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template("Withdrawal Processed", "#94a3b8", "Withdrawal Update", body)
+        await self.send_email(email, "Withdrawal Approved - Astrid Global Ltd", html)
 
     async def send_withdrawal_rejected_email(self, email: str, amount: float, withdrawal_id: int, reason: str = None):
-        """Send withdrawal rejection notification"""
-        subject = "Withdrawal Request Update - Astrid Global Ltd"
+        reason_text = reason or "Please contact support for more details."
+        body = f"""
+    <div style="background-color:#7c2d1220;border:1px solid #ef4444;border-radius:20px;padding:4px 16px;display:inline-block;margin-bottom:16px;">
+      <p style="color:#f87171;font-size:11px;font-weight:700;letter-spacing:1px;margin:0;">DECLINED</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:12px 0 20px;">
+      We were unable to process your withdrawal request.
+    </p>
+    <div style="background-color:#0f172a;border-radius:10px;padding:24px;margin:0 0 20px;">
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 2px;">Amount</p>
+      <p style="color:#e2e8f0;font-size:14px;margin:0 0 10px;">${amount:,.2f}</p>
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 2px;">Request ID</p>
+      <p style="color:#e2e8f0;font-size:14px;margin:0 0 10px;">#{withdrawal_id}</p>
+      <hr style="border-color:#334155;margin:16px 0;">
+      <p style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;margin:0 0 4px;">Reason</p>
+      <p style="color:#fca5a5;font-size:14px;margin:0;line-height:1.5;">{reason_text}</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;margin:0 0 20px;">
+      If you believe this is an error, please contact support with your request ID.
+    </p>
+    <div style="text-align:center;margin:24px 0 0;">
+      <a href="mailto:support@astridgloballtd.pro" style="background-color:#3b82f6;border-radius:8px;color:#ffffff;display:inline-block;font-size:14px;font-weight:600;padding:12px 28px;text-decoration:none;">Contact Support</a>
+    </div>"""
 
-        body = f"""Hello,
-
-We regret to inform you that your withdrawal request has been declined.
-
-Withdrawal Details:
-- Amount: ${amount:.2f}
-- Request ID: {withdrawal_id}
-- Status: Rejected
-
-{f"Reason for rejection: {reason}" if reason else "Please contact support for more details about why this withdrawal was declined."}
-
-If you believe this is an error or need assistance, please contact our support team with the withdrawal ID.
-
-We apologize for any inconvenience this may cause.
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template("Withdrawal Not Processed", "#94a3b8", "Withdrawal Update", body)
+        await self.send_email(email, "Withdrawal Request Update - Astrid Global Ltd", html)
 
     async def send_trade_executed_email(self, email: str, asset: str, side: str, size: float, price: float, total: float):
-        """Send trade execution notification"""
-        subject = f"Trade Executed - {side.upper()} {asset}"
+        is_buy = side.lower() == 'buy'
+        badge_bg = "#065f4620" if is_buy else "#7c2d1220"
+        badge_border = "#10b981" if is_buy else "#ef4444"
+        side_color = "#34d399" if is_buy else "#f87171"
 
-        body = f"""Hello,
+        body = f"""
+    <div style="background-color:{badge_bg};border:1px solid {badge_border};border-radius:20px;padding:4px 16px;display:inline-block;margin-bottom:16px;">
+      <p style="color:#f1f5f9;font-size:11px;font-weight:700;letter-spacing:1px;margin:0;">{side.upper()}</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:12px 0 24px;">
+      Your {side.lower()} order has been successfully filled.
+    </p>
+    <div style="background-color:#0f172a;border-radius:10px;padding:24px;margin:0 0 20px;">
+      <p style="color:#f1f5f9;font-size:20px;font-weight:700;margin:0 0 12px;">{asset}</p>
+      <hr style="border-color:#334155;margin:12px 0;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Side</td><td style="color:{side_color};font-size:14px;font-weight:500;text-align:right;padding:8px 0;">{side.upper()}</td></tr>
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Quantity</td><td style="color:#e2e8f0;font-size:14px;text-align:right;padding:8px 0;">{size}</td></tr>
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Price</td><td style="color:#e2e8f0;font-size:14px;text-align:right;padding:8px 0;">${price:,.2f}</td></tr>
+      </table>
+      <hr style="border-color:#334155;margin:12px 0;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Total Value</td><td style="color:#60a5fa;font-size:18px;font-weight:700;text-align:right;padding:8px 0;">${total:,.2f}</td></tr>
+      </table>
+    </div>
+    <p style="color:#94a3b8;font-size:13px;margin:0;">
+      View this trade and your updated portfolio in your dashboard.
+    </p>"""
 
-Your trade order has been successfully executed.
-
-Trade Details:
-- Asset: {asset}
-- Side: {side.upper()}
-- Size: {size}
-- Price: ${price:.2f}
-- Total Value: ${total:.2f}
-
-You can view this trade and your updated portfolio in your dashboard.
-
-Happy trading!
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template("Trade Executed", "#94a3b8", "Trade Confirmation", body)
+        await self.send_email(email, f"Trade Executed - {side.upper()} {asset}", html)
 
     async def send_strategy_subscription_email(self, email: str, strategy_name: str, invested_amount: float, expected_roi: float, risk_level: str):
-        """Send strategy subscription confirmation email"""
-        subject = f"Strategy Subscription Confirmed - {strategy_name}"
+        body = f"""
+    <div style="background-color:#065f4620;border:1px solid #10b981;border-radius:20px;padding:4px 16px;display:inline-block;margin-bottom:16px;">
+      <p style="color:#34d399;font-size:11px;font-weight:700;letter-spacing:1px;margin:0;">&#x2713; ACTIVE</p>
+    </div>
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:12px 0 24px;">
+      You've successfully subscribed to the <strong style="color:#f1f5f9;">{strategy_name}</strong> strategy.
+    </p>
+    <div style="background-color:#0f172a;border-radius:10px;padding:24px;margin:0 0 24px;">
+      <p style="color:#f1f5f9;font-size:18px;font-weight:700;margin:0 0 16px;">{strategy_name}</p>
+      <hr style="border-color:#334155;margin:0 0 16px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Investment</td><td style="color:#e2e8f0;font-size:14px;font-weight:500;text-align:right;padding:8px 0;">${invested_amount:,.2f}</td></tr>
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Expected Daily ROI</td><td style="color:#34d399;font-size:14px;font-weight:700;text-align:right;padding:8px 0;">{expected_roi:.2f}%</td></tr>
+        <tr><td style="color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px;padding:8px 0;">Risk Level</td><td style="color:#e2e8f0;font-size:14px;text-align:right;padding:8px 0;">{risk_level.title()}</td></tr>
+      </table>
+    </div>
+    <h3 style="color:#e2e8f0;font-size:16px;font-weight:600;margin:0 0 12px;">How it works</h3>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">&#x2022; AI algorithms manage your investment actively</p>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">&#x2022; Daily earnings added to your account automatically</p>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">&#x2022; Monitor real-time performance in your dashboard</p>
+    <p style="color:#cbd5e1;font-size:14px;margin:6px 0;">&#x2022; Unsubscribe at any time to withdraw</p>
+    <div style="text-align:center;margin:28px 0 0;">
+      <a href="https://astridgloballtd.pro/strategies" style="background-color:#3b82f6;border-radius:8px;color:#ffffff;display:inline-block;font-size:14px;font-weight:600;padding:12px 28px;text-decoration:none;">View Strategy</a>
+    </div>"""
 
-        body = f"""Hello,
-
-Great news! You have successfully subscribed to the {strategy_name} strategy.
-
-Subscription Details:
-- Strategy: {strategy_name}
-- Investment Amount: ${invested_amount:.2f}
-- Expected Daily ROI: {expected_roi:.2f}%
-- Risk Level: {risk_level.title()}
-
-What happens next:
-1. Your strategy will start generating earnings immediately based on market conditions
-2. You can monitor your earnings in your dashboard anytime
-3. Earnings are calculated daily and can vary slightly due to market volatility
-4. You can unsubscribe at any time to withdraw your investment plus accumulated earnings
-
-Strategy Performance:
-- Your investment is actively managed by our AI-powered algorithms
-- Daily earnings will be added to your account automatically
-- You can view real-time performance in your strategy dashboard
-
-Important Notes:
-- Minimum earnings guarantee: 0.01% of your investment per day
-- Earnings may vary ±20% due to market conditions
-- All investments carry risk, including the potential loss of principal
-
-If you have any questions about your strategy subscription, please don't hesitate to contact our support team.
-
-Happy investing!
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
+        html = _base_template("Strategy Subscribed", "#94a3b8", "Strategy Confirmation", body)
+        await self.send_email(email, f"Strategy Subscription Confirmed - {strategy_name}", html)
 
     async def send_password_reset_email(self, email: str, reset_token: str):
-        """Send password reset email"""
-        subject = "Password Reset Request - Astrid Global Ltd"
+        reset_link = f"https://astridgloballtd.pro/reset-password?token={reset_token}"
 
-        reset_link = f"http://localhost:8080/reset-password?token={reset_token}"  # Adjust URL as needed
+        body = f"""
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      You requested a password reset for your Astrid Global Ltd account.
+      Click the button below to set a new password.
+    </p>
+    <div style="text-align:center;margin:32px 0;">
+      <a href="{reset_link}" style="background-color:#3b82f6;border-radius:8px;color:#ffffff;display:inline-block;font-size:15px;font-weight:600;padding:14px 32px;text-decoration:none;">Reset Password</a>
+    </div>
+    <p style="color:#f59e0b;font-size:13px;text-align:center;margin:0 0 16px;">
+      This link expires in 1 hour for security reasons.
+    </p>
+    <hr style="border-color:#334155;margin:24px 0;">
+    <p style="color:#cbd5e1;font-size:15px;line-height:1.6;margin:0 0 16px;">
+      If you didn't request this reset, you can safely ignore this email.
+    </p>
+    <div style="background-color:#0f172a;border-radius:8px;padding:16px;margin:16px 0 0;">
+      <p style="color:#64748b;font-size:12px;margin:0 0 8px;">If the button doesn't work, copy this URL:</p>
+      <p style="color:#60a5fa;font-size:12px;word-break:break-all;margin:0;font-family:monospace;">{reset_link}</p>
+    </div>"""
 
-        body = f"""Hello,
+        html = _base_template("Reset Your Password", "#94a3b8", "Password Reset", body)
+        await self.send_email(email, "Password Reset Request - Astrid Global Ltd", html)
 
-You have requested to reset your password for your Astrid Global Ltd account.
-
-To reset your password, please click the link below:
-{reset_link}
-
-This link will expire in 1 hour for security reasons.
-
-If you didn't request this password reset, please ignore this email. Your password will remain unchanged.
-
-If the link doesn't work, copy and paste the URL into your browser.
-
-Best regards,
-The Astrid Global Ltd Team
-support@astridglobal.com"""
-
-        await self.send_email(email, subject, body)
 
 # Global email service instance
 email_service = EmailService()

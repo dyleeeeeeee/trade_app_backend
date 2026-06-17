@@ -51,7 +51,12 @@ async def get_current_price(asset):
             'BTC/USD': ('BTC', 'USD', 'crypto'),
             'ETH/USD': ('ETH', 'USD', 'crypto'),
             'AAPL': ('AAPL', 'stock'),
-            'GOOGL': ('GOOGL', 'stock')
+            'GOOGL': ('GOOGL', 'stock'),
+            'NVDA': ('NVDA', 'stock'),
+            'TSLA': ('TSLA', 'stock'),
+            'META': ('META', 'stock'),
+            'AMZN': ('AMZN', 'stock'),
+            'SPACEX': ('TSLA', 'stock'),
         }
 
         if asset not in asset_map:
@@ -103,7 +108,12 @@ async def get_current_price(asset):
             'BTC/USD': 45000.00,
             'ETH/USD': 2400.00,
             'AAPL': 182.50,
-            'GOOGL': 142.30
+            'GOOGL': 142.30,
+            'NVDA': 130.00,
+            'TSLA': 250.00,
+            'META': 500.00,
+            'AMZN': 185.00,
+            'SPACEX': 250.00,
         }
         fallback_price = fallback_prices.get(asset, 100.0)
         set_cached_price(asset, fallback_price)  # Cache fallback price too
@@ -412,7 +422,12 @@ async def get_prices():
         {'symbol': 'BTC/USD', 'name': 'Bitcoin', 'id': 'bitcoin'},
         {'symbol': 'ETH/USD', 'name': 'Ethereum', 'id': 'ethereum'},
         {'symbol': 'AAPL', 'name': 'Apple Inc.', 'id': 'apple'},
-        {'symbol': 'GOOGL', 'name': 'Alphabet Inc.', 'id': 'google'}
+        {'symbol': 'GOOGL', 'name': 'Alphabet Inc.', 'id': 'google'},
+        {'symbol': 'NVDA', 'name': 'NVIDIA Corp.', 'id': 'nvidia'},
+        {'symbol': 'TSLA', 'name': 'Tesla Inc.', 'id': 'tesla'},
+        {'symbol': 'META', 'name': 'Meta Platforms', 'id': 'meta'},
+        {'symbol': 'AMZN', 'name': 'Amazon.com', 'id': 'amazon'},
+        {'symbol': 'SPACEX', 'name': 'SpaceX', 'id': 'spacex'},
     ]
 
     priced_assets = []

@@ -112,6 +112,13 @@ async def forgot_password():
     if not email:
         return jsonify({'message': 'Email required'}), 400
 
-    # In a real app, you'd send an email here
-    # For now, just return success
+    async with current_app.db_pool.acquire() as conn:
+        user = await conn.fetchrow('SELECT id FROM users WHERE email = $1', email)
+
+    if user:
+        import secrets
+        import asyncio
+        reset_token = secrets.token_urlsafe(32)
+        asyncio.create_task(email_service.send_password_reset_email(email, reset_token))
+
     return jsonify({'message': 'Password reset email sent'}), 200

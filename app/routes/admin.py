@@ -96,6 +96,35 @@ async def approve_withdrawal(withdrawal_id):
 
             return jsonify({'message': 'Withdrawal approved successfully'}), 200
 
+@admin_bp.route('/admin/withdrawals/<int:withdrawal_id>/reject', methods=['POST'])
+async def reject_withdrawal(withdrawal_id):
+    data = await request.get_json() or {}
+    reason = data.get('reason')
+
+    async with current_app.db_pool.acquire() as conn:
+        async with conn.transaction():
+            withdrawal = await conn.fetchrow('''
+                SELECT * FROM withdrawals WHERE id = $1 AND status = 'pending'
+            ''', withdrawal_id)
+
+            if not withdrawal:
+                return jsonify({'message': 'Withdrawal not found or already processed'}), 404
+
+            await conn.execute('''
+                UPDATE withdrawals
+                SET status = 'rejected', processed_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+            ''', withdrawal_id)
+
+            user = await conn.fetchrow('SELECT email FROM users WHERE id = $1', withdrawal['user_id'])
+
+            import asyncio
+            asyncio.create_task(email_service.send_withdrawal_rejected_email(
+                user['email'], float(withdrawal['amount']), withdrawal_id, reason
+            ))
+
+            return jsonify({'message': 'Withdrawal rejected'}), 200
+
 @admin_bp.route('/admin/users/<int:user_id>/balance', methods=['POST'])
 async def update_user_balance(user_id):
     data = await request.get_json()

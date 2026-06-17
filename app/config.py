@@ -30,17 +30,7 @@ class QuartConfig:
     SESSION_COOKIE_SAMESITE = 'Lax'  # Use 'None' in production with HTTPS
     SESSION_COOKIE_DOMAIN = None  # Allow any domain
 
-    # Email settings (MailerSend API preferred, Railway-compatible)
-    # For Railway deployment, use MailerSend API token:
-    # MAILERSEND_TOKEN=your_mailersend_api_token_here
-    #
-    # Get token from: https://app.mailersend.com/api-tokens
-    #
-    # SMTP fallback for development:
-    MAILERSEND_TOKEN = os.getenv('MAILERSEND_TOKEN', '')
-    SMTP_SERVER = os.getenv('SMTP_SERVER', '')  # Empty for development (skips emails)
-    SMTP_PORT = int(os.getenv('SMTP_PORT', '587'))
-    SMTP_USERNAME = os.getenv('SMTP_USERNAME', '')
-    SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
-    EMAIL_FROM = os.getenv('EMAIL_FROM', 'admin@astridglobal.com')
+    # Email settings (Resend)
+    RESEND_API_KEY = os.getenv('RESEND_API_KEY', '')
+    EMAIL_FROM = os.getenv('EMAIL_FROM', 'notifications@astridgloballtd.pro')
     EMAIL_FROM_NAME = os.getenv('EMAIL_FROM_NAME', 'Astrid Global Ltd')

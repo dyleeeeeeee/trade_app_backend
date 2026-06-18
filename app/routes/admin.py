@@ -167,6 +167,16 @@ async def update_user_balance(user_id):
                     VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ''', user_id, transaction_type, abs(adjustment), current_balance, new_balance, current_profit, current_profit)
 
+                # A positive adjustment is a deposit/credit to the customer —
+                # send a deposit confirmation (fire-and-forget, never blocks).
+                if adjustment > 0:
+                    import asyncio
+                    user_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+                    user_email = user_row['email'] if user_row else None
+                    asyncio.create_task(email_service.send_deposit_confirmation_email(
+                        user_email, float(adjustment), float(new_balance)
+                    ))
+
             return jsonify({
                 'message': 'User balance updated successfully',
                 'previous_balance': current_balance,

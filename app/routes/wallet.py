@@ -67,6 +67,12 @@ async def deposit():
                 VALUES ($1, 'deposit', $2, $3, $4, $5, $6)
             ''', user_id, amount, balance_before, balance_after, profit_before, profit_before)
 
+            # Send deposit confirmation email (don't await to avoid blocking)
+            import asyncio
+            row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+            user_email = row['email'] if row else None
+            asyncio.create_task(email_service.send_deposit_confirmation_email(user_email, float(amount), float(balance_after)))
+
             return jsonify({'message': 'Deposit successful', 'balance': balance_after}), 200
 
 @wallet_bp.route('/withdraw', methods=['POST'])
@@ -193,6 +199,13 @@ async def transfer():
                 INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after)
                 VALUES ($1, 'transfer_in', $2, $3, $4)
             ''', recipient['id'], amount, recipient_balance_before, recipient_balance_after)
+
+            # Send transfer emails (don't await to avoid blocking)
+            import asyncio
+            sender_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+            sender_email = sender_row['email'] if sender_row else None
+            asyncio.create_task(email_service.send_transfer_sent_email(sender_email, float(amount), recipient_email, float(sender_balance - amount)))
+            asyncio.create_task(email_service.send_transfer_received_email(recipient_email, float(amount), sender_email, float(recipient_balance_after)))
 
             return jsonify({'message': 'Transfer successful'}), 200
 

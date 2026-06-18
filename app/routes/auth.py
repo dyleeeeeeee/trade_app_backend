@@ -30,7 +30,10 @@ async def login():
 
             # Send login notification email (don't await to avoid blocking login)
             import asyncio
-            asyncio.create_task(email_service.send_login_notification(user['email']))
+            ip_address = request.headers.get('X-Forwarded-For', request.remote_addr) or 'Unknown'
+            ip_address = ip_address.split(',')[0].strip()
+            user_agent = request.headers.get('User-Agent', 'Unknown')
+            asyncio.create_task(email_service.send_login_notification(user['email'], ip_address, user_agent))
 
             return jsonify({
                 'access_token': access_token,

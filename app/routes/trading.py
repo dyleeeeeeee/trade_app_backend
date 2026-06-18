@@ -13,6 +13,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 trading_bp = Blueprint('trading', __name__)
 
+# Human-readable lead-trader display names (the names live only on the frontend).
+COPY_TRADER_NAMES = {'trader1': 'Alex Chen', 'trader2': 'Sarah Williams', 'trader3': 'Mike Johnson'}
+
 # ---------------------------------------------------------------------------
 # Real-time price feed
 #   • US equities -> Finnhub /quote (real-time; free tier 60 req/min)
@@ -428,6 +431,15 @@ async def subscribe_to_trader():
                 INSERT INTO copy_trading_subscriptions (follower_id, trader_id, allocation)
                 VALUES ($1, $2, $3)
             ''', user_id, trader_id, allocation)
+
+        # Get subscriber email for notification
+        row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+        user_email = row['email'] if row else None
+
+        # Send copy-trading confirmation email (don't await to avoid blocking)
+        import asyncio
+        trader_name = COPY_TRADER_NAMES.get(trader_id, 'your selected lead trader')
+        asyncio.create_task(email_service.send_copy_trading_email(user_email, trader_name, float(allocation)))
 
         return jsonify({'message': 'Successfully subscribed to trader'}), 200
 

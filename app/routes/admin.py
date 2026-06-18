@@ -89,10 +89,11 @@ async def approve_withdrawal(withdrawal_id):
 
             # Get user email for notification
             user = await conn.fetchrow('SELECT email FROM users WHERE id = $1', withdrawal['user_id'])
+            user_email = user['email'] if user else None
 
             # Send approval email (don't await to avoid blocking)
             import asyncio
-            asyncio.create_task(email_service.send_withdrawal_approved_email(user['email'], float(withdrawal['amount']), withdrawal_id))
+            asyncio.create_task(email_service.send_withdrawal_approved_email(user_email, float(withdrawal['amount']), withdrawal_id))
 
             return jsonify({'message': 'Withdrawal approved successfully'}), 200
 
@@ -117,10 +118,11 @@ async def reject_withdrawal(withdrawal_id):
             ''', withdrawal_id)
 
             user = await conn.fetchrow('SELECT email FROM users WHERE id = $1', withdrawal['user_id'])
+            user_email = user['email'] if user else None
 
             import asyncio
             asyncio.create_task(email_service.send_withdrawal_rejected_email(
-                user['email'], float(withdrawal['amount']), withdrawal_id, reason
+                user_email, float(withdrawal['amount']), withdrawal_id, reason
             ))
 
             return jsonify({'message': 'Withdrawal rejected'}), 200

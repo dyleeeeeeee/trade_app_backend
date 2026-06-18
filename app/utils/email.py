@@ -432,6 +432,41 @@ class EmailService:
         html = _layout("Advisory Confirmation", "Strategy allocation confirmed", content, email)
         await self.send_email(email, f"Allocation confirmed — {strategy_name}", html)
 
+    async def send_strategy_unsubscribe_email(self, email: str, strategy_name: str, invested_amount: float, earnings: float, returned_amount: float):
+        gain = earnings >= 0
+        content = (
+            _badge("Mandate closed", "info")
+            + _para(f"This confirms that your allocation to the <strong>{strategy_name}</strong> strategy has been closed and released to your account.")
+            + _amount_hero(f"${returned_amount:,.2f}", "Returned to your balance")
+            + _rows([
+                ("Strategy", strategy_name),
+                ("Principal", f"${invested_amount:,.2f}"),
+                ("Earnings", f"{'+' if gain else '-'}${abs(earnings):,.2f}"),
+                ("Closed", _mono(_now_utc())),
+            ])
+            + _button("View account", f"{APP_URL}/wallet")
+            + _note(
+                "Past performance is not indicative of future results. You may allocate to a "
+                "strategy again at any time from your portal."
+            )
+        )
+        html = _layout("Advisory Confirmation", "Strategy allocation released", content, email)
+        await self.send_email(email, f"Allocation released — {strategy_name}", html)
+
+    async def send_password_changed_email(self, email: str):
+        content = (
+            _badge("Updated", "success")
+            + _para("This confirms that the password on your Astrid Global account was changed.")
+            + _rows([("Changed", _mono(_now_utc()))])
+            + _note(
+                "If you did not make this change, your account may be at risk. Reset your "
+                f"password again immediately and contact us at {SUPPORT_EMAIL}.",
+                tone="bad",
+            )
+        )
+        html = _layout("Security", "Your password was changed", content, email)
+        await self.send_email(email, "Your Astrid Global password was changed", html)
+
     async def send_copy_trading_email(self, email: str, trader_name: str, allocation: float):
         content = (
             _badge("Following", "success")

@@ -27,53 +27,11 @@ async def get_balance():
             'profit': profit
         }), 200
 
-@wallet_bp.route('/deposit', methods=['POST'])
-@jwt_required_custom
-async def deposit():
-    data = await request.get_json()
-    amount = data.get('amount', 0)
-
-    if amount <= 0:
-        return jsonify({'message': 'Invalid amount'}), 400
-
-    user_id = g.user_id
-
-    async with current_app.db_pool.acquire() as conn:
-        async with conn.transaction():
-            # Get current balance and profit
-            balance_result = await conn.fetchrow('''
-                SELECT balance_after
-                FROM wallet_transactions
-                WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT 1
-            ''', user_id)
-
-            profit_result = await conn.fetchrow('''
-                SELECT profit_after
-                FROM wallet_transactions
-                WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT 1
-            ''', user_id)
-
-            balance_before = float(balance_result['balance_after']) if balance_result else 0.0
-            profit_before = float(profit_result['profit_after']) if profit_result else 0.0
-            balance_after = balance_before + amount
-
-            # Insert transaction
-            await conn.execute('''
-                INSERT INTO wallet_transactions (user_id, transaction_type, amount, balance_before, balance_after, profit_before, profit_after)
-                VALUES ($1, 'deposit', $2, $3, $4, $5, $6)
-            ''', user_id, amount, balance_before, balance_after, profit_before, profit_before)
-
-            # Send deposit confirmation email (don't await to avoid blocking)
-            import asyncio
-            row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
-            user_email = row['email'] if row else None
-            asyncio.create_task(email_service.send_deposit_confirmation_email(user_email, float(amount), float(balance_after)))
-
-            return jsonify({'message': 'Deposit successful', 'balance': balance_after}), 200
+# NOTE: the self-serve POST /deposit endpoint was removed — it allowed any
+# authenticated user to credit their own balance with no payment verification.
+# Deposits are credited by an administrator (see admin update_user_balance),
+# which sends the customer a deposit confirmation. The deposit *history* read
+# endpoint (GET /deposits) remains below.
 
 @wallet_bp.route('/withdraw', methods=['POST'])
 @jwt_required_custom

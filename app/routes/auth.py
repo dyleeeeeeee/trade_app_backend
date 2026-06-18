@@ -118,10 +118,58 @@ async def forgot_password():
     async with current_app.db_pool.acquire() as conn:
         user = await conn.fetchrow('SELECT id FROM users WHERE email = $1', email)
 
-    if user:
-        import secrets
-        import asyncio
-        reset_token = secrets.token_urlsafe(32)
-        asyncio.create_task(email_service.send_password_reset_email(email, reset_token))
+        if user:
+            import secrets
+            import asyncio
+            from datetime import datetime, timezone, timedelta as _timedelta
+            reset_token = secrets.token_urlsafe(32)
+            expires_at = datetime.now(timezone.utc) + _timedelta(hours=1)
+            try:
+                # Persist the token so it can be validated when the user returns.
+                await conn.execute('''
+                    INSERT INTO password_reset_tokens (user_id, token, expires_at)
+                    VALUES ($1, $2, $3)
+                ''', user['id'], reset_token, expires_at)
+                asyncio.create_task(email_service.send_password_reset_email(email, reset_token))
+            except Exception as e:
+                # Don't break the request if the table is missing (run the migration).
+                print(f"forgot-password: could not persist reset token: {e}")
 
-    return jsonify({'message': 'Password reset email sent'}), 200
+    # Uniform response regardless of whether the account exists (no enumeration).
+    return jsonify({'message': 'If an account exists for that email, a reset link has been sent.'}), 200
+
+
+@auth_bp.route('/reset-password', methods=['POST'])
+async def reset_password():
+    data = await request.get_json()
+    token = data.get('token')
+    new_password = data.get('password')
+
+    if not token or not new_password:
+        return jsonify({'message': 'Token and new password are required'}), 400
+    if len(new_password) < 8:
+        return jsonify({'message': 'Password must be at least 8 characters'}), 400
+
+    try:
+        async with current_app.db_pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow('''
+                    SELECT prt.id, prt.user_id, u.email
+                    FROM password_reset_tokens prt
+                    JOIN users u ON u.id = prt.user_id
+                    WHERE prt.token = $1 AND prt.used = false AND prt.expires_at > now()
+                ''', token)
+
+                if not row:
+                    return jsonify({'message': 'This reset link is invalid or has expired.'}), 400
+
+                await conn.execute('UPDATE users SET password = $1 WHERE id = $2', new_password, row['user_id'])
+                await conn.execute('UPDATE password_reset_tokens SET used = true WHERE id = $1', row['id'])
+    except Exception as e:
+        print(f"reset-password error: {e}")
+        return jsonify({'message': 'This reset link is invalid or has expired.'}), 400
+
+    # Confirm the change after it has committed (fire-and-forget).
+    import asyncio
+    asyncio.create_task(email_service.send_password_changed_email(row['email']))
+    return jsonify({'message': 'Your password has been reset. You can now sign in.'}), 200

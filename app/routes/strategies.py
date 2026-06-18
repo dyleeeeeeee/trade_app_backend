@@ -446,6 +446,14 @@ async def unsubscribe_from_strategy(strategy_id):
                 VALUES ($1, 'strategy_unsubscription', $2, $3, $4, $5, $6)
             ''', user_id, return_amount, current_balance, current_balance + return_amount, current_profit, current_profit)
 
+            # Confirmation email — allocation released (fire-and-forget)
+            import asyncio
+            user_row = await conn.fetchrow('SELECT email FROM users WHERE id = $1', user_id)
+            user_email = user_row['email'] if user_row else None
+            asyncio.create_task(email_service.send_strategy_unsubscribe_email(
+                user_email, subscription['name'], invested_amount, total_earnings, return_amount
+            ))
+
             return jsonify({
                 'message': f'Successfully unsubscribed from {subscription["name"]}',
                 'returned_amount': return_amount,

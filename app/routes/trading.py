@@ -6,48 +6,56 @@ import asyncio
 import os
 import time
 import numpy as np
-from typing import Dict, Optional
-import yfinance as yf
-import random
+from typing import Dict, Optional, List, Tuple, Callable
+import json
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 trading_bp = Blueprint('trading', __name__)
 
-# Rotating proxy pool for yfinance requests
-_PROXIES = [
-    'http://hphohzrw:vyvzniyrz5n6@38.154.203.95:5863',
-    'http://hphohzrw:vyvzniyrz5n6@198.105.121.200:6462',
-    'http://hphohzrw:vyvzniyrz5n6@64.137.96.74:6641',
-    'http://hphohzrw:vyvzniyrz5n6@209.127.138.10:5784',
-    'http://hphohzrw:vyvzniyrz5n6@38.154.185.97:6370',
-    'http://hphohzrw:vyvzniyrz5n6@84.247.60.125:6095',
-    'http://hphohzrw:vyvzniyrz5n6@142.111.67.146:5611',
-    'http://hphohzrw:vyvzniyrz5n6@191.96.254.138:6185',
-    'http://hphohzrw:vyvzniyrz5n6@23.229.19.94:8689',
-    'http://hphohzrw:vyvzniyrz5n6@2.57.20.2:6983',
-]
+# ---------------------------------------------------------------------------
+# Real-time price feed
+#   • US equities -> Finnhub /quote (real-time; free tier 60 req/min)
+#   • Crypto      -> Coinbase Exchange stats (free, no key, US-accessible, and
+#                    matches the COINBASE:* chart symbols on the frontend)
+#
+# Caching: one warm in-memory cache served with stale-while-revalidate +
+# single-flight refresh. User requests are answered instantly from cache and
+# never block on upstream; the cache is refreshed at most once per TTL no
+# matter how much traffic arrives. All symbols are fetched concurrently, and a
+# failed fetch keeps the last good value instead of dropping the symbol.
+# Trade fills force a fresh fetch so they never execute on stale data.
+# ---------------------------------------------------------------------------
 
-def _get_proxy():
-    proxy = random.choice(_PROXIES)
-    return {'http': proxy, 'https': proxy}
+FINNHUB_API_KEY = os.environ.get('FINNHUB_API_KEY', '')
+FINNHUB_BASE = 'https://finnhub.io/api/v1'
+COINBASE_BASE = 'https://api.exchange.coinbase.com'
+_HTTP_TIMEOUT = 6  # seconds
 
-# Unified price cache
+# Unified price cache: { platform_symbol: {price, change, ..., timestamp} }
 _price_cache: Dict[str, Dict] = {}
-_CACHE_TTL = 30  # 30 seconds
+_CACHE_TTL = 12  # seconds a cache entry is considered fresh
+_refresh_lock = asyncio.Lock()
 
-# Map platform symbols to yfinance tickers
-SYMBOL_TO_YF = {
+# Crypto via Coinbase (free, no key, US-OK, same venue as the chart)
+CRYPTO_COINBASE = {
     'BTC/USD': 'BTC-USD',
     'ETH/USD': 'ETH-USD',
+}
+
+# US equities via Finnhub real-time quotes
+STOCK_FINNHUB = {
     'AAPL': 'AAPL',
     'GOOGL': 'GOOGL',
     'NVDA': 'NVDA',
     'TSLA': 'TSLA',
     'META': 'META',
     'AMZN': 'AMZN',
-    # SpaceX went public on NASDAQ (ticker SPCX) on 2026-06-12 — use the real
-    # ticker. (Previously aliased to TSLA when SpaceX was still private.)
+    # SpaceX IPO'd on NASDAQ as SPCX on 2026-06-12.
     'SPACEX': 'SPCX',
 }
+
+SUPPORTED_SYMBOLS = set(CRYPTO_COINBASE) | set(STOCK_FINNHUB)
 
 ASSET_META = [
     {'symbol': 'BTC/USD', 'name': 'Bitcoin', 'id': 'bitcoin'},
@@ -62,42 +70,75 @@ ASSET_META = [
 ]
 
 
-def _fetch_all_prices_sync() -> Dict[str, Dict]:
-    """Fetch all prices from yfinance using proxied requests."""
-    yf_tickers = list(set(SYMBOL_TO_YF.values()))
-    results = {}
-    proxy = _get_proxy()['http']
-    for yf_sym in yf_tickers:
-        try:
-            ticker = yf.Ticker(yf_sym)
-            ticker.proxy = proxy
-            info = ticker.fast_info
-            price = info.get('lastPrice', 0) or info.get('last_price', 0)
-            prev_close = info.get('previousClose', 0) or info.get('previous_close', 0)
-            change = price - prev_close if prev_close else 0
-            change_pct = (change / prev_close * 100) if prev_close else 0
-            results[yf_sym] = {
-                'price': round(price, 2),
-                'change': round(change, 2),
-                'changePercent': round(change_pct, 2),
-                'previousClose': round(prev_close, 2),
-                'volume': int(info.get('lastVolume', 0) or info.get('last_volume', 0) or 0),
-                'marketCap': int(info.get('marketCap', 0) or info.get('market_cap', 0) or 0),
-            }
-        except Exception as e:
-            print(f"yfinance error for {yf_sym}: {e}")
-            results[yf_sym] = None
+def _http_get_json(url: str) -> dict:
+    req = urllib.request.Request(url, headers={'User-Agent': 'astrid-trading/1.0'})
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+        return json.loads(resp.read().decode('utf-8'))
+
+
+def _fetch_coinbase(product: str) -> Optional[Dict]:
+    stats = _http_get_json(f'{COINBASE_BASE}/products/{product}/stats')
+    last = float(stats.get('last') or 0)
+    if last == 0:
+        return None
+    open_ = float(stats.get('open') or 0)
+    change = last - open_ if open_ else 0.0
+    change_pct = (change / open_ * 100) if open_ else 0.0
+    return {
+        'price': round(last, 2),
+        'change': round(change, 2),
+        'changePercent': round(change_pct, 2),
+        'previousClose': round(open_, 2),
+        'volume': int(float(stats.get('volume') or 0)),
+        'marketCap': 0,
+    }
+
+
+def _fetch_finnhub(symbol: str) -> Optional[Dict]:
+    if not FINNHUB_API_KEY:
+        return None
+    data = _http_get_json(f'{FINNHUB_BASE}/quote?symbol={symbol}&token={FINNHUB_API_KEY}')
+    price = float(data.get('c') or 0)
+    if price == 0:
+        return None
+    return {
+        'price': round(price, 2),
+        'change': round(float(data.get('d') or 0), 2),
+        'changePercent': round(float(data.get('dp') or 0), 2),
+        'previousClose': round(float(data.get('pc') or 0), 2),
+        'volume': 0,
+        'marketCap': 0,
+    }
+
+
+def _fetch_all_prices_sync() -> Dict[str, Optional[Dict]]:
+    """Fetch every symbol concurrently (crypto: Coinbase, stocks: Finnhub)."""
+    jobs: List[Tuple[str, Callable[[], Optional[Dict]]]] = []
+    for platform_sym, product in CRYPTO_COINBASE.items():
+        jobs.append((platform_sym, lambda p=product: _fetch_coinbase(p)))
+    for platform_sym, fh_sym in STOCK_FINNHUB.items():
+        jobs.append((platform_sym, lambda s=fh_sym: _fetch_finnhub(s)))
+
+    results: Dict[str, Optional[Dict]] = {}
+    with ThreadPoolExecutor(max_workers=min(10, len(jobs))) as pool:
+        future_map = {pool.submit(fn): sym for sym, fn in jobs}
+        for fut in as_completed(future_map):
+            sym = future_map[fut]
+            try:
+                results[sym] = fut.result()
+            except Exception as e:
+                print(f"price fetch error for {sym}: {e}")
+                results[sym] = None
     return results
 
 
 async def _refresh_cache():
-    """Refresh the global price cache using yfinance (runs in thread)."""
-    global _price_cache
+    """Refresh from upstream. Keeps last-good values for any failed symbol."""
     raw = await asyncio.to_thread(_fetch_all_prices_sync)
     now = time.time()
-    for platform_sym, yf_sym in SYMBOL_TO_YF.items():
-        if yf_sym in raw and raw[yf_sym]:
-            _price_cache[platform_sym] = {**raw[yf_sym], 'timestamp': now}
+    for platform_sym, data in raw.items():
+        if data:
+            _price_cache[platform_sym] = {**data, 'timestamp': now}
 
 
 def _cache_valid() -> bool:
@@ -107,16 +148,35 @@ def _cache_valid() -> bool:
     return (time.time() - any_ts) < _CACHE_TTL
 
 
+async def _ensure_prices():
+    """Stale-while-revalidate + single-flight for read endpoints.
+
+    Cold cache -> fetch and wait. Warm-but-stale -> serve the current cache
+    immediately and refresh in the background. At most one refresh at a time."""
+    if not _price_cache:
+        async with _refresh_lock:
+            if not _price_cache:
+                await _refresh_cache()
+        return
+    if not _cache_valid() and not _refresh_lock.locked():
+        async def _bg():
+            async with _refresh_lock:
+                if not _cache_valid():
+                    await _refresh_cache()
+        asyncio.create_task(_bg())
+
+
 async def get_current_price(asset: str) -> Optional[float]:
-    """Get current price for an asset (used by trade execution)."""
-    if asset not in SYMBOL_TO_YF:
+    """Live price for trade execution — forces a fresh fetch when the cache is
+    cold or stale so fills never execute on outdated data."""
+    if asset not in SUPPORTED_SYMBOLS:
         return None
     if not _cache_valid():
-        await _refresh_cache()
+        async with _refresh_lock:
+            if not _cache_valid():
+                await _refresh_cache()
     cached = _price_cache.get(asset)
-    if cached:
-        return cached['price']
-    return None
+    return cached['price'] if cached else None
 
 @trading_bp.route('/trade', methods=['POST'])
 @jwt_required_custom
@@ -396,9 +456,9 @@ async def get_subscriptions():
 
 @trading_bp.route('/prices', methods=['GET'])
 async def get_prices():
-    """Get current market prices for all assets via yfinance batch."""
-    if not _cache_valid():
-        await _refresh_cache()
+    """Current market prices (crypto: Coinbase, stocks: Finnhub), served from a
+    warm cache with stale-while-revalidate so the response is always instant."""
+    await _ensure_prices()
 
     priced_assets = []
     for asset in ASSET_META:
